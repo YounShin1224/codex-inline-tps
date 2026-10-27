@@ -83,7 +83,7 @@
     element.setAttribute('aria-live', 'off');
     element.style.cssText = 'position:absolute;display:block;box-sizing:border-box;width:max-content;height:20px;margin:0;padding:0;grid-column:1 / -1;grid-row:2;align-self:center;justify-self:center;z-index:2;text-align:center;pointer-events:auto;cursor:default;user-select:text;overflow:hidden;';
     const grid = document.createElement('span');
-    grid.style.cssText = 'display:inline-flex;align-items:center;column-gap:6px;font:inherit;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:20px;';
+    grid.style.cssText = 'display:inline-flex;align-items:center;column-gap:2px;font:inherit;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:20px;';
     for (let i = 0; i < 5; i++) {
       const span = document.createElement('span');
       span.style.cssText = 'min-width:0;text-align:center;';
@@ -199,7 +199,7 @@
       : '等待本轮完整的请求用量计数。';
     const title = `${metrics?.model ?? '等待当前模型数据'}\n${phase}${measuredAt}\nTPS = 官方输出 token（含思考）÷ 本地模型输出区间的合并时长；排除工具执行区间。这是本地记录推算值，并非服务器精确瞬时速度。\n均值只含本对话同模型的有效实测样本（${metrics?.samples ?? 0} 次），不足 1 秒的样本不参与。\n缓存 = 当前主会话这一轮所有已完成请求的缓存输入总和 ÷ 输入总和。${cacheDetails}`;
     if (row.title !== title) row.title = title;
-    const label = text.join(' · ');
+    const label = text.join('·');
     if (row.getAttribute('aria-label') !== label) row.setAttribute('aria-label', label);
   }
 
