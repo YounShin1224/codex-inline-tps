@@ -78,7 +78,8 @@ test('short, zero-output, missing-window and crossed-window responses do not aff
   engine.ingest(usage('missing', 'none', 35000));
   assert.equal(engine.snapshot().samples, 1);
   assert.equal(engine.snapshot().mean, 200);
-  assert.equal(engine.snapshot().current, null);
+  assert.equal(engine.snapshot().current, 200);
+  assert.equal(engine.snapshot().held, true);
 });
 
 test('models and threads stay separate, including known UI names and an unknown selected model', () => {
@@ -192,7 +193,8 @@ test('an interval crossing a usage boundary is rejected rather than assigned twi
     item('a', 'crossed', 3900, 6000), usage('a', 'r2', 7000), event('a', 'task_complete', 8000)]
     .forEach((entry) => engine.ingest(entry));
   assert.equal(engine.snapshot().samples, 1);
-  assert.equal(engine.snapshot().current, null);
+  assert.equal(engine.snapshot().current, 200);
+  assert.equal(engine.snapshot().held, true);
 });
 
 test('UTF-8 characters split at an I/O boundary are decoded without corrupting JSON', async () => {

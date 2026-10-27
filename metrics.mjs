@@ -161,7 +161,8 @@ export class SessionMetrics {
       if (event.kind === 'tool-end') calls.delete(event.callId);
     }
     const estimating = Boolean(running && active.model === model && calls.size === 0);
-    const latestValid = latestResponse?.valid ? latestResponse : null;
+    const latestValid = samples.at(-1) ?? null;
+    const held = Boolean(!estimating && latestValid && latestResponse?.responseId !== latestValid.responseId);
     // Cache is weighted over the current root turn, including every main-chat model/tool follow-up.
     // A new turn starts empty; duplicate response IDs were already removed while ingesting usage.
     const cacheTurn = active ?? turns.filter((turn) => turn.usage.size).sort((a, b) =>
@@ -174,7 +175,7 @@ export class SessionMetrics {
     const cacheHitTokens = cacheComplete ? cacheUsages.reduce((sum, usage) => sum + usage.cached, 0) : null;
     const cache = cacheInputTokens > 0 ? cacheHitTokens / cacheInputTokens * 100 : null;
     return {
-      threadId: this.threadId, model, running, estimating,
+      threadId: this.threadId, model, running, estimating, held,
       phase: running ? (calls.size ? 'tool' : 'generating') : 'idle',
       current: estimating ? weighted(samples.slice(-5)) : latestValid ? latestValid.output * 1000 / latestValid.duration : null,
       mean: weighted(samples), cache, samples: samples.length, rejected,

@@ -83,20 +83,34 @@
     element.setAttribute('aria-live', 'off');
     element.style.cssText = 'position:absolute;display:block;box-sizing:border-box;width:max-content;height:20px;margin:0;padding:0;grid-column:1 / -1;grid-row:2;align-self:center;justify-self:center;z-index:2;text-align:center;pointer-events:auto;cursor:default;user-select:text;overflow:hidden;';
     const grid = document.createElement('span');
-    grid.style.cssText = 'display:inline-flex;align-items:center;column-gap:4px;font:inherit;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:20px;';
+    grid.style.cssText = 'display:inline-flex;align-items:center;column-gap:6px;font:inherit;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:20px;';
     for (let i = 0; i < 5; i++) {
       const span = document.createElement('span');
       span.style.cssText = 'min-width:0;text-align:center;';
-      if (i % 2) span.textContent = '-';
+      if (i % 2) {
+        span.textContent = '·';
+        span.style.opacity = '0.55';
+        span.setAttribute('aria-hidden', 'true');
+      }
       else {
         span.style.display = 'inline-flex';
         span.style.alignItems = 'baseline';
         const index = values.length;
-        if (index) span.append(document.createTextNode(index === 1 ? '均值 ' : 'cache '));
+        if (index) {
+          const label = document.createElement('span');
+          label.textContent = index === 1 ? '均值' : '缓存';
+          label.style.marginInlineEnd = '4px';
+          span.append(label);
+        }
+        if (index === 0) span.style.fontWeight = '500';
         const digit = document.createElement('span');
         digit.style.cssText = `display:inline-block;min-width:${index === 2 ? 4 : 3}ch;text-align:right;`;
         const suffix = document.createElement('span');
-        suffix.textContent = index === 2 ? '%' : 'tok/s';
+        suffix.textContent = index === 0 ? 'tok/s' : index === 2 ? '%' : '';
+        if (index === 0) {
+          suffix.style.marginInlineStart = '3px';
+          suffix.style.fontWeight = '400';
+        }
         span.append(digit, suffix);
         digits.push(digit);
         suffixes.push(suffix);
@@ -116,12 +130,15 @@
     const size = style.getPropertyValue('--text-sm').trim() || '13px';
     const color = style.getPropertyValue('--color-text-secondary').trim()
       || style.getPropertyValue('--color-text-tertiary').trim() || style.color;
-    const key = `${font}|${size}|${color}`;
+    const primary = style.getPropertyValue('--color-text').trim()
+      || style.getPropertyValue('--app-color-text-foreground').trim() || style.color;
+    const key = `${font}|${size}|${color}|${primary}`;
     if (lastStyle !== key) {
       row.style.fontFamily = font;
       row.style.fontSize = size;
       row.style.fontWeight = '400';
       row.style.color = color;
+      values[0].style.color = primary;
       lastStyle = key;
     }
   }
@@ -164,24 +181,27 @@
 
   function paint() {
     if (!row) return;
-    const tps = (value) => Number.isFinite(value) ? `${Math.round(value)}tok/s` : '—tok/s';
+    const tps = (value) => Number.isFinite(value) ? `${Math.round(value)} tok/s` : '— tok/s';
     const text = [
       tps(metrics?.current),
-      `均值 ${tps(metrics?.mean)}`,
-      `cache ${Number.isFinite(metrics?.cache) ? metrics.cache.toFixed(1) + '%' : '—'}`,
+      `均值 ${Number.isFinite(metrics?.mean) ? Math.round(metrics.mean) : '—'}`,
+      `缓存 ${Number.isFinite(metrics?.cache) ? metrics.cache.toFixed(1) + '%' : '—'}`,
     ];
     const numeric = [metrics?.current, metrics?.mean].map((value) => Number.isFinite(value) ? String(Math.round(value)) : '—');
     numeric.push(Number.isFinite(metrics?.cache) ? metrics.cache.toFixed(1) : '—');
     digits.forEach((element, index) => { if (element.textContent !== numeric[index]) element.textContent = numeric[index]; });
     suffixes[2].textContent = Number.isFinite(metrics?.cache) ? '%' : '';
-    const phase = metrics?.phase === 'tool' ? '工具运行中，保留最近读数。' : metrics?.estimating
-      ? '生成中：第一项为本对话同模型最近五次有效响应的加权估算，完成后用本地记录修正。' : '第一项为最近一次可测量的已完成模型响应。';
+    const phase = metrics?.phase === 'tool' ? '工具运行中，保留最近一次有效模型响应的读数。' : metrics?.estimating
+      ? '生成中：第一项为本对话同模型最近五次有效响应的加权估算，完成后用本地记录修正。'
+      : metrics?.held ? '最新响应没有有效计时，当前保留最近一次有效模型响应的读数。' : '第一项为最近一次可测量的已完成模型响应。';
+    const measuredAt = Number.isFinite(metrics?.lastSampleAt)
+      ? `\n最近有效样本：${new Date(metrics.lastSampleAt).toLocaleTimeString('zh-CN', { hour12: false })}，输出区间 ${(metrics.lastDurationMs / 1000).toFixed(2)} 秒。` : '';
     const cacheDetails = metrics?.cacheComplete
       ? `本轮已完成 ${metrics.cacheRequests} 次模型请求，缓存输入合计 ${metrics.cacheHitTokens}，输入合计 ${metrics.cacheInputTokens}。`
       : '等待本轮完整的请求用量计数。';
-    const title = `${metrics?.model ?? '等待当前模型数据'}\n${phase}\nTPS = 官方输出 token（含思考）÷ 本地模型输出区间的合并时长；排除工具执行区间。这是本地记录推算值，并非服务器精确瞬时速度。\n均值只含本对话同模型的有效实测样本（${metrics?.samples ?? 0} 次），不足 1 秒的样本不参与。\ncache = 当前主会话这一轮所有已完成请求的缓存输入总和 ÷ 输入总和。${cacheDetails}`;
+    const title = `${metrics?.model ?? '等待当前模型数据'}\n${phase}${measuredAt}\nTPS = 官方输出 token（含思考）÷ 本地模型输出区间的合并时长；排除工具执行区间。这是本地记录推算值，并非服务器精确瞬时速度。\n均值只含本对话同模型的有效实测样本（${metrics?.samples ?? 0} 次），不足 1 秒的样本不参与。\n缓存 = 当前主会话这一轮所有已完成请求的缓存输入总和 ÷ 输入总和。${cacheDetails}`;
     if (row.title !== title) row.title = title;
-    const label = text.join(' - ');
+    const label = text.join(' · ');
     if (row.getAttribute('aria-label') !== label) row.setAttribute('aria-label', label);
   }
 

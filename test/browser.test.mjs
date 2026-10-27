@@ -85,8 +85,8 @@ test('inline rendering: center, font, themes, model/chat isolation, reload and c
     await pageB.update(reading(B, 75));
     let a = await pageA.diagnostics();
     let b = await pageB.diagnostics();
-    assert.equal(a.text, '200tok/s - 均值 200tok/s - cache 90.5%');
-    assert.equal(b.text, '75tok/s - 均值 200tok/s - cache 90.5%');
+    assert.equal(a.text, '200 tok/s · 均值 200 · 缓存 90.5%');
+    assert.equal(b.text, '75 tok/s · 均值 200 · 缓存 90.5%');
     assert.ok(a.centerError < 0.5);
     assert.match(a.font, /Segoe UI/);
     assert.equal(a.fontSize, '13px');
@@ -94,7 +94,7 @@ test('inline rendering: center, font, themes, model/chat isolation, reload and c
     await pageA.update(reading(A, 9));
     assert.equal(await evaluate(pageA, 'document.querySelector("[data-codex-tps]").getBoundingClientRect().x'), before);
     await pageA.update({ ...reading(A, 215), estimating: true, phase: 'generating' });
-    assert.ok((await pageA.diagnostics()).text.startsWith('215tok/s'));
+    assert.ok((await pageA.diagnostics()).text.startsWith('215 tok/s'));
 
     // Native font/theme changes, narrower composers and multiline drafts preserve alignment.
     await evaluate(pageA, 'document.body.classList.add("dark");document.documentElement.style.setProperty("--font-ui-family","Arial");document.querySelector("main").style.width="360px";document.querySelector("[contenteditable]").innerText="one\\ntwo\\nthree";true');
@@ -121,14 +121,14 @@ test('inline rendering: center, font, themes, model/chat isolation, reload and c
     // A chat or picker switch clears the old numbers before new data can be delivered.
     await evaluate(pageA, `history.pushState({},'', '/local/${B}');dispatchEvent(new PopStateEvent('popstate'));true`);
     await until(() => pageA.context?.threadId === B, 'Thread context did not switch');
-    assert.ok((await pageA.diagnostics()).text.startsWith('—tok/s'));
+    assert.ok((await pageA.diagnostics()).text.startsWith('— tok/s'));
     await pageA.update(reading(A, 999));
-    assert.ok((await pageA.diagnostics()).text.startsWith('—tok/s'));
+    assert.ok((await pageA.diagnostics()).text.startsWith('— tok/s'));
     await pageA.update(reading(B, 75));
-    assert.ok((await pageA.diagnostics()).text.startsWith('75tok/s'));
+    assert.ok((await pageA.diagnostics()).text.startsWith('75 tok/s'));
     await evaluate(pageA, 'document.querySelector("#model").textContent="GPT-6.1 Terra";true');
     await until(() => pageA.context?.modelLabel === 'GPT-6.1 Terra', 'Model context did not switch');
-    assert.ok((await pageA.diagnostics()).text.startsWith('—tok/s'));
+    assert.ok((await pageA.diagnostics()).text.startsWith('— tok/s'));
 
     // A native subtree replacement and full page reload each recreate exactly one row.
     await evaluate(pageB, 'document.querySelector("#outer").outerHTML=document.querySelector("#outer").outerHTML;true');
