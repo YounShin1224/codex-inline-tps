@@ -19,9 +19,24 @@ $existingCodex = Get-CimInstance Win32_Process -Filter "Name='ChatGPT.exe'" |
 $componentArguments = @(('"{0}"' -f $componentMain), 'start', '--codex', ('"{0}"' -f $codexExecutable))
 if ($existingCodex) { $componentArguments += @('--existing-pid', [string]$existingCodex.ProcessId) }
 
-# Keep the background helper's console hidden. It waits for a normal user exit instead of killing Codex.
+# Launch through Windows' local process provider so the helper outlives the calling app's job.
+# A hidden console and the current user's interactive session are preserved without startup tasks.
 $runtimeDirectory = Join-Path $PSScriptRoot '.runtime'
 New-Item -ItemType Directory -Force -Path $runtimeDirectory | Out-Null
-Start-Process -FilePath $nodeCommand.Source -ArgumentList $componentArguments -WindowStyle Hidden `
-    -RedirectStandardOutput (Join-Path $runtimeDirectory 'launcher-out.log') `
-    -RedirectStandardError (Join-Path $runtimeDirectory 'launcher-error.log') | Out-Null
+$startupInformation = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
+    ShowWindow = [uint16]0
+}
+$nodeCommandLine = ('"{0}" ' -f $nodeCommand.Source) + ($componentArguments -join ' ')
+$launchResult = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+    CommandLine = $nodeCommandLine
+    CurrentDirectory = $PSScriptRoot
+    ProcessStartupInformation = $startupInformation
+}
+if ($launchResult.ReturnValue -ne 0) {
+    $failure = 'Windows could not start the independent TPS helper. Error code: ' + $launchResult.ReturnValue
+    $failure | Set-Content -LiteralPath (Join-Path $runtimeDirectory 'launcher-error.log') -Encoding UTF8
+    throw $failure
+}
+
+# Clear a previous launch failure only after the independent process was successfully created.
+Set-Content -LiteralPath (Join-Path $runtimeDirectory 'launcher-error.log') -Value '' -NoNewline -Encoding UTF8
