@@ -1,0 +1,29 @@
+# Publish only the reviewed source manifest. Everything else is local by default.
+/*
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/SECURITY.md
+!/LICENSE
+!/package.json
+!/metrics.mjs
+!/renderer.js
+!/cdp.mjs
+!/main.mjs
+!/start.ps1
+!/stop.ps1
+!/启动 Codex TPS.vbs
+!/停止 Codex TPS.vbs
+!/test/
+/test/*
+!/test/metrics.test.mjs
+!/test/browser.test.mjs
+
+# Explicitly document sensitive local state even though the allowlist already excludes it.
+/.runtime/
+/.env*
+*.log
+*.sqlite*
+*.pem
+*.key
+node_modules/

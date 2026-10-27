@@ -1,0 +1,8 @@
+{
+  "name": "codex-inline-tps",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": { "test": "node --test test/*.test.mjs", "status": "node main.mjs status", "stop": "node main.mjs stop" }
+}
