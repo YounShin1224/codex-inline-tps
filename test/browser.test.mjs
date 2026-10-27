@@ -85,8 +85,8 @@ test('inline rendering: center, font, themes, model/chat isolation, reload and c
     await pageB.update(reading(B, 75));
     let a = await pageA.diagnostics();
     let b = await pageB.diagnostics();
-    assert.equal(a.text, '200tok/s·均值200·缓存90.5%');
-    assert.equal(b.text, '75tok/s·均值200·缓存90.5%');
+    assert.equal(a.text, '200tok/s·均值200·缓存90.50%');
+    assert.equal(b.text, '75tok/s·均值200·缓存90.50%');
     assert.ok(a.visualCenterError < 0.5);
     assert.match(a.font, /Segoe UI/);
     assert.equal(a.fontSize, '13px');

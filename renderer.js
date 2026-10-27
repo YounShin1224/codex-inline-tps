@@ -183,15 +183,12 @@
     if (!row) return;
     const tps = (value) => Number.isFinite(value) ? `${Math.round(value)}tok/s` : '—tok/s';
 
-    // Preserve ordinary one-decimal labels; never round a partial cache hit into a full-hit claim.
+    // Cache always uses two decimals; never round a partial cache hit into a full-hit claim.
     let cacheValue = '—';
     if (Number.isFinite(metrics?.cache)) {
-      const ordinary = metrics.cache.toFixed(1);
+      const ordinary = metrics.cache.toFixed(2);
       const fullHit = metrics.cacheInputTokens > 0 && metrics.cacheHitTokens === metrics.cacheInputTokens;
-      if (ordinary === '100.0' && !fullHit) {
-        const precise = metrics.cache.toFixed(2);
-        cacheValue = precise === '100.00' ? '<100' : precise;
-      } else cacheValue = ordinary;
+      cacheValue = ordinary === '100.00' && !fullHit ? '<100.00' : ordinary;
     }
     const text = [
       tps(metrics?.current),
