@@ -10,6 +10,7 @@
   const UUID = '[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}';
   let row = null;
   let anchor = null;
+  let mountPoint = null;
   let frame = null;
   let stopped = false;
   let lastContext = '';
@@ -19,16 +20,23 @@
 
   // Route parsing is per renderer/window. No globally most-recent chat is ever substituted.
   const threadFromLocation = () => {
+    const composer = findComposer();
+    const marker = composer?.outer.querySelector('[data-above-composer-conversation-id]');
+    if (marker) {
+      const id = marker.getAttribute('data-above-composer-conversation-id');
+      return new RegExp(`^${UUID}$`, 'i').test(id ?? '') ? id.toLowerCase() : null;
+    }
     for (const path of [location.pathname, location.hash.slice(1)]) {
       const match = decodeURIComponent(path).match(new RegExp(`/(?:local|threads|hotkey-window/thread)/(${UUID})(?:/|$|[?#])`, 'i'));
       if (match) return match[1].toLowerCase();
     }
     return null;
   };
-  const visible = (element) => element.isConnected && element.getClientRects().length > 0
-    && getComputedStyle(element).visibility !== 'hidden';
+  const visible = (element) => element.isConnected && (element.checkVisibility
+    ? element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+    : element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden');
 
-  // Prefer the outer dedicated composer wrapper, placing the row outside its inner input card.
+  // The native input grid's first cell grows with the editor. Append there to stay inside the card.
   function findComposer() {
     const editors = document.querySelectorAll('[data-codex-composer-root] [contenteditable="true"]');
     for (const editor of editors) {
@@ -39,7 +47,11 @@
         outer = ancestor;
         ancestor = outer.parentElement?.closest('[data-codex-composer-root]');
       }
-      if (outer) return { outer, editor, nested: Boolean(outer.querySelector('[data-codex-composer-root]')) };
+      const footer = editor.closest('[data-composer-footer-responsive]');
+      let mount = editor;
+      while (mount.parentElement && mount.parentElement !== footer) mount = mount.parentElement;
+      if (!footer || mount.parentElement !== footer) mount = null;
+      if (outer) return { outer, editor, mount };
     }
     return null;
   }
@@ -50,7 +62,11 @@
     const candidates = [...composer.outer.querySelectorAll('button, [role="combobox"]')];
     for (const element of candidates) {
       if (!visible(element)) continue;
-      const text = element.innerText?.trim().replace(/\s+/g, ' ');
+      const nativeName = element.querySelector('[class*="ModelPickerTriggerModelText"]');
+      if (nativeName && visible(nativeName)) return nativeName.textContent.trim();
+      const label = element.cloneNode(true);
+      label.querySelectorAll('select, option, [hidden], [aria-hidden="true"]').forEach((node) => node.remove());
+      const text = label.textContent?.trim().replace(/\s+/g, ' ');
       if (text && text.length < 100 && MODEL.test(text)) return text;
     }
     return null;
@@ -63,7 +79,7 @@
     element.dataset.codexTps = 'true';
     element.setAttribute('role', 'status');
     element.setAttribute('aria-live', 'off');
-    element.style.cssText = 'display:block;box-sizing:border-box;width:100%;min-height:20px;margin:4px 0 0;padding:0;flex:0 0 auto;text-align:center;pointer-events:auto;cursor:default;user-select:text;';
+    element.style.cssText = 'display:block;box-sizing:border-box;width:100%;min-height:20px;margin:4px 0;padding:0;flex:0 0 auto;text-align:center;pointer-events:auto;cursor:default;user-select:text;';
     const grid = document.createElement('span');
     grid.style.cssText = 'display:inline-grid;grid-template-columns:10ch 2ch 17ch 2ch 13ch;align-items:center;justify-content:center;max-width:100%;font:inherit;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.5;';
     for (let i = 0; i < 5; i++) {
@@ -138,14 +154,13 @@
       row?.remove();
       row = null;
       anchor = null;
+      mountPoint = null;
       values = [];
       context.reason = !threadId ? 'no-local-thread' : 'no-composer';
       publish(context);
       return;
     }
-    const parentStyle = getComputedStyle(composer.outer.parentElement);
-    const canInsertSibling = parentStyle.display !== 'flex' || parentStyle.flexDirection.startsWith('column');
-    if (!composer.nested && !canInsertSibling) {
+    if (!composer.mount) {
       row?.remove();
       row = null;
       values = [];
@@ -153,15 +168,15 @@
       publish(context);
       return;
     }
-    if (!row || !row.isConnected || anchor !== composer.outer) {
+    if (!row || !row.isConnected || anchor !== composer.outer || mountPoint !== composer.mount) {
       row?.remove();
       document.querySelectorAll('[data-codex-tps]').forEach((element) => element.remove());
       values = [];
       row = makeRow();
       anchor = composer.outer;
+      mountPoint = composer.mount;
       lastStyle = '';
-      if (composer.nested) composer.outer.append(row);
-      else composer.outer.after(row);
+      composer.mount.append(row);
     }
     // Clear stale chat/model values synchronously, before any round trip to the helper.
     const previous = lastContext ? JSON.parse(lastContext) : null;

@@ -18,8 +18,9 @@ const fixture = `<!doctype html><meta charset="utf-8"><style>
 body { margin:0; background:#f6f6f6; color:#171717; font-family:var(--font-sans); }
 main { margin:30px auto; width:620px; } #outer { min-width:0; } #inner { background:white; border:1px solid #ddd; border-radius:18px; padding:14px; }
 [contenteditable] { min-height:70px; outline:none; } footer {display:flex;justify-content:space-between;margin-top:8px;font-size:13px;}
+[data-composer-footer-responsive] { display:grid;grid-template-columns:1fr; } .input-cell {grid-row:1;} footer{grid-row:2;}
 body.dark { background:#202020; color:#eee; --color-text-secondary:#aaa; } body.dark #inner{background:#292929;border-color:#444;}
-</style><main><div id="outer" data-codex-composer-root><div id="inner" data-codex-composer-root><div contenteditable="true" aria-label="Message">测试输入框</div><footer><span>完全访问</span><button id="model">GPT-6.1 Sol</button><button id="send">发送</button></footer></div></div></main>
+</style><main><div id="outer" data-codex-composer-root><div id="inner" data-codex-composer-root><div data-composer-footer-responsive><div class="input-cell"><div contenteditable="true" aria-label="Message">测试输入框</div></div><footer><span>完全访问</span><button id="model">GPT-6.1 Sol</button><button id="send">发送</button></footer></div></div></div></main>
 <script>let sends=0;document.querySelector('#send').onclick=()=>sends++;document.querySelector('[contenteditable]').addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='Enter')sends++});</script>`;
 
 async function findBrowser() {
