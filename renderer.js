@@ -182,13 +182,24 @@
   function paint() {
     if (!row) return;
     const tps = (value) => Number.isFinite(value) ? `${Math.round(value)}tok/s` : '—tok/s';
+
+    // Preserve ordinary one-decimal labels; never round a partial cache hit into a full-hit claim.
+    let cacheValue = '—';
+    if (Number.isFinite(metrics?.cache)) {
+      const ordinary = metrics.cache.toFixed(1);
+      const fullHit = metrics.cacheInputTokens > 0 && metrics.cacheHitTokens === metrics.cacheInputTokens;
+      if (ordinary === '100.0' && !fullHit) {
+        const precise = metrics.cache.toFixed(2);
+        cacheValue = precise === '100.00' ? '<100' : precise;
+      } else cacheValue = ordinary;
+    }
     const text = [
       tps(metrics?.current),
       `均值${Number.isFinite(metrics?.mean) ? Math.round(metrics.mean) : '—'}`,
-      `缓存${Number.isFinite(metrics?.cache) ? metrics.cache.toFixed(1) + '%' : '—'}`,
+      `缓存${Number.isFinite(metrics?.cache) ? cacheValue + '%' : '—'}`,
     ];
     const numeric = [metrics?.current, metrics?.mean].map((value) => Number.isFinite(value) ? String(Math.round(value)) : '—');
-    numeric.push(Number.isFinite(metrics?.cache) ? metrics.cache.toFixed(1) : '—');
+    numeric.push(cacheValue);
     digits.forEach((element, index) => { if (element.textContent !== numeric[index]) element.textContent = numeric[index]; });
     suffixes[2].textContent = Number.isFinite(metrics?.cache) ? '%' : '';
     const phase = metrics?.phase === 'tool' ? '工具运行中，保留最近一次有效模型响应的读数。' : metrics?.estimating
