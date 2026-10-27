@@ -99,16 +99,14 @@
         if (index) {
           const label = document.createElement('span');
           label.textContent = index === 1 ? '均值' : '缓存';
-          label.style.marginInlineEnd = '4px';
           span.append(label);
         }
         if (index === 0) span.style.fontWeight = '500';
         const digit = document.createElement('span');
-        digit.style.cssText = `display:inline-block;min-width:${index === 2 ? 4 : 3}ch;text-align:right;`;
+        digit.style.cssText = `display:inline-block;min-width:${index === 0 ? 3 : 0}ch;text-align:${index === 0 ? 'right' : 'left'};`;
         const suffix = document.createElement('span');
         suffix.textContent = index === 0 ? 'tok/s' : index === 2 ? '%' : '';
         if (index === 0) {
-          suffix.style.marginInlineStart = '3px';
           suffix.style.fontWeight = '400';
         }
         span.append(digit, suffix);
@@ -181,11 +179,11 @@
 
   function paint() {
     if (!row) return;
-    const tps = (value) => Number.isFinite(value) ? `${Math.round(value)} tok/s` : '— tok/s';
+    const tps = (value) => Number.isFinite(value) ? `${Math.round(value)}tok/s` : '—tok/s';
     const text = [
       tps(metrics?.current),
-      `均值 ${Number.isFinite(metrics?.mean) ? Math.round(metrics.mean) : '—'}`,
-      `缓存 ${Number.isFinite(metrics?.cache) ? metrics.cache.toFixed(1) + '%' : '—'}`,
+      `均值${Number.isFinite(metrics?.mean) ? Math.round(metrics.mean) : '—'}`,
+      `缓存${Number.isFinite(metrics?.cache) ? metrics.cache.toFixed(1) + '%' : '—'}`,
     ];
     const numeric = [metrics?.current, metrics?.mean].map((value) => Number.isFinite(value) ? String(Math.round(value)) : '—');
     numeric.push(Number.isFinite(metrics?.cache) ? metrics.cache.toFixed(1) : '—');
