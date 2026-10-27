@@ -18,9 +18,11 @@ const fixture = `<!doctype html><meta charset="utf-8"><style>
 body { margin:0; background:#f6f6f6; color:#171717; font-family:var(--font-sans); }
 main { margin:30px auto; width:620px; } #outer { min-width:0; } #inner { background:white; border:1px solid #ddd; border-radius:18px; padding:14px; }
 [contenteditable] { min-height:70px; outline:none; } footer {display:flex;justify-content:space-between;margin-top:8px;font-size:13px;}
-[data-composer-footer-responsive] { display:grid;grid-template-columns:1fr; } .input-cell {grid-row:1;} footer{grid-row:2;}
+[data-composer-footer-responsive] { display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;column-gap:5px; }
+.input-cell {grid-row:1;grid-column:1/-1;} .left-controls{grid-row:2;grid-column:1;font-size:13px;}
+footer{grid-row:2;grid-column:3;gap:6px;}
 body.dark { background:#202020; color:#eee; --color-text-secondary:#aaa; } body.dark #inner{background:#292929;border-color:#444;}
-</style><main><div id="outer" data-codex-composer-root><div id="inner" data-codex-composer-root><div data-composer-footer-responsive><div class="input-cell"><div contenteditable="true" aria-label="Message">测试输入框</div></div><footer><span>完全访问</span><button id="model">GPT-6.1 Sol</button><button id="send">发送</button></footer></div></div></div></main>
+</style><main><div id="outer" data-codex-composer-root><div id="inner" data-codex-composer-root><div data-composer-footer-responsive><div class="input-cell"><div contenteditable="true" aria-label="Message">测试输入框</div></div><span class="left-controls">完全访问</span><footer><button id="model">GPT-6.1 Sol</button><button id="send">发送</button></footer></div></div></div></main>
 <script>let sends=0;document.querySelector('#send').onclick=()=>sends++;document.querySelector('[contenteditable]').addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='Enter')sends++});</script>`;
 
 async function findBrowser() {
@@ -92,12 +94,12 @@ test('inline rendering: center, font, themes, model/chat isolation, reload and c
     await pageA.update(reading(A, 9));
     assert.equal(await evaluate(pageA, 'document.querySelector("[data-codex-tps]").getBoundingClientRect().x'), before);
     await pageA.update({ ...reading(A, 215), estimating: true, phase: 'generating' });
-    assert.ok((await pageA.diagnostics()).text.startsWith('≈215tok/s'));
+    assert.ok((await pageA.diagnostics()).text.startsWith('215tok/s'));
 
     // Native font/theme changes, narrower composers and multiline drafts preserve alignment.
     await evaluate(pageA, 'document.body.classList.add("dark");document.documentElement.style.setProperty("--font-ui-family","Arial");document.querySelector("main").style.width="360px";document.querySelector("[contenteditable]").innerText="one\\ntwo\\nthree";true');
     await until(async () => (await pageA.diagnostics())?.font.includes('Arial'), 'Font did not follow native CSS');
-    assert.ok((await pageA.diagnostics()).centerError < 0.5);
+    assert.ok(await evaluate(pageA, '(()=>{let a=document.querySelector("[data-codex-tps]").getBoundingClientRect(),b=document.querySelector("#model").getBoundingClientRect();return Math.abs(a.y+a.height/2-b.y-b.height/2)<1&&a.right<=b.left})()'));
     assert.equal(await evaluate(pageA, 'getComputedStyle(document.querySelector("[data-codex-tps]")).color'), 'rgb(170, 170, 170)');
     const dimensions = await pageA.cdp.call('Page.getLayoutMetrics');
     const image = await pageA.cdp.call('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: Math.min(dimensions.cssContentSize.width, 1000), height: 300, scale: 1 } });

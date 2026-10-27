@@ -17,6 +17,10 @@
   let lastStyle = '';
   let metrics = null;
   let values = [];
+  let digits = [];
+  let suffixes = [];
+  let positionedHost = null;
+  let originalPosition = '';
 
   // Route parsing is per renderer/window. No globally most-recent chat is ever substituted.
   const threadFromLocation = () => {
@@ -36,7 +40,7 @@
     ? element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
     : element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden');
 
-  // The native input grid's first cell grows with the editor. Append there to stay inside the card.
+  // Mount directly in the native footer grid, on the same grid row as its model picker.
   function findComposer() {
     const editors = document.querySelectorAll('[data-codex-composer-root] [contenteditable="true"]');
     for (const editor of editors) {
@@ -48,9 +52,7 @@
         ancestor = outer.parentElement?.closest('[data-codex-composer-root]');
       }
       const footer = editor.closest('[data-composer-footer-responsive]');
-      let mount = editor;
-      while (mount.parentElement && mount.parentElement !== footer) mount = mount.parentElement;
-      if (!footer || mount.parentElement !== footer) mount = null;
+      const mount = footer ?? null;
       if (outer) return { outer, editor, mount };
     }
     return null;
@@ -72,21 +74,34 @@
     return null;
   }
 
-  // Stable grid tracks reserve space for every number. Content changes never reposition the group.
+  // Reserve only numeric digit widths. Labels and separators keep compact, natural spacing.
   function makeRow() {
     const element = document.createElement('div');
     element.id = ID;
     element.dataset.codexTps = 'true';
     element.setAttribute('role', 'status');
     element.setAttribute('aria-live', 'off');
-    element.style.cssText = 'display:block;box-sizing:border-box;width:100%;min-height:20px;margin:4px 0;padding:0;flex:0 0 auto;text-align:center;pointer-events:auto;cursor:default;user-select:text;';
+    element.style.cssText = 'position:absolute;display:block;box-sizing:border-box;width:max-content;height:20px;margin:0;padding:0;grid-column:1 / -1;grid-row:2;align-self:center;justify-self:center;z-index:2;text-align:center;pointer-events:auto;cursor:default;user-select:text;overflow:hidden;';
     const grid = document.createElement('span');
-    grid.style.cssText = 'display:inline-grid;grid-template-columns:10ch 2ch 17ch 2ch 13ch;align-items:center;justify-content:center;max-width:100%;font:inherit;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.5;';
+    grid.style.cssText = 'display:inline-flex;align-items:center;column-gap:4px;font:inherit;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:20px;';
     for (let i = 0; i < 5; i++) {
       const span = document.createElement('span');
       span.style.cssText = 'min-width:0;text-align:center;';
       if (i % 2) span.textContent = '-';
-      else values.push(span);
+      else {
+        span.style.display = 'inline-flex';
+        span.style.alignItems = 'baseline';
+        const index = values.length;
+        if (index) span.append(document.createTextNode(index === 1 ? '均值 ' : 'cache '));
+        const digit = document.createElement('span');
+        digit.style.cssText = `display:inline-block;min-width:${index === 2 ? 4 : 3}ch;text-align:right;`;
+        const suffix = document.createElement('span');
+        suffix.textContent = index === 2 ? '%' : 'tok/s';
+        span.append(digit, suffix);
+        digits.push(digit);
+        suffixes.push(suffix);
+        values.push(span);
+      }
       grid.append(span);
     }
     element.append(grid);
@@ -109,28 +124,58 @@
       row.style.color = color;
       lastStyle = key;
     }
-    // A very narrow composer can wrap at separators while the surrounding row stays centered.
-    const narrow = composer.outer.getBoundingClientRect().width < 310;
-    const grid = row.firstElementChild;
-    const template = narrow ? '1fr' : '10ch 2ch 17ch 2ch 13ch';
-    if (grid.style.gridTemplateColumns !== template) grid.style.gridTemplateColumns = template;
-    [...grid.children].forEach((element, index) => {
-      const display = narrow && index % 2 ? 'none' : '';
-      if (element.style.display !== display) element.style.display = display;
-    });
+  }
+
+  // Positioning does not add a new input row. Restore the native host style when stopping/remounting.
+  function releaseHost() {
+    if (positionedHost && positionedHost.style.position === 'relative') positionedHost.style.position = originalPosition;
+    positionedHost = null;
+  }
+
+  function syncPlacement(composer) {
+    const host = composer.mount;
+    const nativeModel = host.querySelector('[class*="ModelPickerTriggerModelText"]')?.closest('button')
+      ?? [...host.querySelectorAll('button')].find((button) => MODEL.test(button.textContent));
+    let controlCell = nativeModel;
+    while (controlCell?.parentElement && controlCell.parentElement !== host) controlCell = controlCell.parentElement;
+    const nativeRow = controlCell ? getComputedStyle(controlCell).gridRowStart : '2';
+    if (row.style.gridRow !== nativeRow && /^\d+$/.test(nativeRow)) row.style.gridRow = nativeRow;
+
+    // Use the measured gap between native controls; clip only if a narrow window has no room.
+    const bounds = host.getBoundingClientRect();
+    const modelBounds = nativeModel?.getBoundingClientRect();
+    const centerY = modelBounds ? modelBounds.y + modelBounds.height / 2 : bounds.bottom - 14;
+    const leftCell = [...host.children].find((element) => element !== row
+      && getComputedStyle(element).gridColumnStart === '1'
+      && getComputedStyle(element).gridRowStart === nativeRow
+      && !element.contains(composer.editor));
+    const left = (leftCell?.getBoundingClientRect().right ?? bounds.left) + 8;
+    const rightControls = [...(controlCell?.querySelectorAll('button,[role="button"]') ?? [])]
+      .filter((element) => visible(element) && Math.abs(element.getBoundingClientRect().y + element.getBoundingClientRect().height / 2 - centerY) < 8);
+    const right = (rightControls.length ? Math.min(...rightControls.map((element) => element.getBoundingClientRect().left)) : bounds.right) - 8;
+    const available = Math.max(0, right - left);
+    row.style.maxWidth = `${available}px`;
+    const width = Math.min(row.firstElementChild.getBoundingClientRect().width, available);
+    const center = bounds.x + bounds.width / 2;
+    const clamped = Math.max(left + width / 2, Math.min(center, right - width / 2));
+    const margin = `${(clamped - center) * 2}px`;
+    if (row.style.marginLeft !== margin) row.style.marginLeft = margin;
   }
 
   function paint() {
     if (!row) return;
     const tps = (value) => Number.isFinite(value) ? `${Math.round(value)}tok/s` : '—tok/s';
     const text = [
-      `${metrics?.estimating && Number.isFinite(metrics.current) ? '≈' : ''}${tps(metrics?.current)}`,
+      tps(metrics?.current),
       `均值 ${tps(metrics?.mean)}`,
       `cache ${Number.isFinite(metrics?.cache) ? metrics.cache.toFixed(1) + '%' : '—'}`,
     ];
-    values.forEach((element, index) => { if (element.textContent !== text[index]) element.textContent = text[index]; });
+    const numeric = [metrics?.current, metrics?.mean].map((value) => Number.isFinite(value) ? String(Math.round(value)) : '—');
+    numeric.push(Number.isFinite(metrics?.cache) ? metrics.cache.toFixed(1) : '—');
+    digits.forEach((element, index) => { if (element.textContent !== numeric[index]) element.textContent = numeric[index]; });
+    suffixes[2].textContent = Number.isFinite(metrics?.cache) ? '%' : '';
     const phase = metrics?.phase === 'tool' ? '工具运行中，保留最近读数。' : metrics?.estimating
-      ? '≈ 为本对话同模型最近五次有效响应的加权估算，完成后用本地记录修正。' : '第一项为最近一次可测量的已完成模型响应。';
+      ? '生成中：第一项为本对话同模型最近五次有效响应的加权估算，完成后用本地记录修正。' : '第一项为最近一次可测量的已完成模型响应。';
     const title = `${metrics?.model ?? '等待当前模型数据'}\n${phase}\nTPS = 官方输出 token（含思考）÷ 本地模型输出区间的合并时长；排除工具执行区间。这是本地记录推算值，并非服务器精确瞬时速度。\n均值只含本对话同模型的有效实测样本（${metrics?.samples ?? 0} 次），不足 1 秒的样本不参与。\ncache = 最近一次完成请求的缓存输入 token ÷ 输入 token。`;
     if (row.title !== title) row.title = title;
     const label = text.join(' - ');
@@ -152,6 +197,7 @@
     const context = { threadId, modelLabel: modelLabel(composer), mounted: false, reason: null };
     if (!threadId || !composer) {
       row?.remove();
+      releaseHost();
       row = null;
       anchor = null;
       mountPoint = null;
@@ -162,6 +208,7 @@
     }
     if (!composer.mount) {
       row?.remove();
+      releaseHost();
       row = null;
       values = [];
       context.reason = 'unsupported-composer-layout';
@@ -170,19 +217,28 @@
     }
     if (!row || !row.isConnected || anchor !== composer.outer || mountPoint !== composer.mount) {
       row?.remove();
+      releaseHost();
       document.querySelectorAll('[data-codex-tps]').forEach((element) => element.remove());
       values = [];
+      digits = [];
+      suffixes = [];
       row = makeRow();
       anchor = composer.outer;
       mountPoint = composer.mount;
       lastStyle = '';
       composer.mount.append(row);
+      if (getComputedStyle(composer.mount).position === 'static') {
+        positionedHost = composer.mount;
+        originalPosition = composer.mount.style.position;
+        composer.mount.style.position = 'relative';
+      }
     }
     // Clear stale chat/model values synchronously, before any round trip to the helper.
     const previous = lastContext ? JSON.parse(lastContext) : null;
     if (previous && (previous.threadId !== threadId || previous.modelLabel !== context.modelLabel)) metrics = null;
     syncStyle(composer);
     paint();
+    syncPlacement(composer);
     context.mounted = true;
     publish(context);
   }
@@ -205,6 +261,7 @@
       if ((next.modelLabel ?? null) !== modelLabel(findComposer())) return;
       metrics = next;
       paint();
+      schedule();
     },
     refresh: schedule,
     diagnostics() {
@@ -224,6 +281,7 @@
       removeEventListener('hashchange', schedule);
       removeEventListener('resize', schedule);
       row?.remove();
+      releaseHost();
       delete globalThis.__codexTps;
     },
   };
