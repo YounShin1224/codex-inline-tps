@@ -21,6 +21,7 @@
   let suffixes = [];
   let positionedHost = null;
   let originalPosition = '';
+  let visualCenter = null;
 
   // Route parsing is per renderer/window. No globally most-recent chat is ever substituted.
   const threadFromLocation = () => {
@@ -156,7 +157,7 @@
     const nativeRow = controlCell ? getComputedStyle(controlCell).gridRowStart : '2';
     if (row.style.gridRow !== nativeRow && /^\d+$/.test(nativeRow)) row.style.gridRow = nativeRow;
 
-    // Use the measured gap between native controls; clip only if a narrow window has no room.
+    // Center in the actual gap between controls so unequal left/right button widths feel balanced.
     const bounds = host.getBoundingClientRect();
     const modelBounds = nativeModel?.getBoundingClientRect();
     const centerY = modelBounds ? modelBounds.y + modelBounds.height / 2 : bounds.bottom - 14;
@@ -172,7 +173,8 @@
     row.style.maxWidth = `${available}px`;
     const width = Math.min(row.firstElementChild.getBoundingClientRect().width, available);
     const center = bounds.x + bounds.width / 2;
-    const clamped = Math.max(left + width / 2, Math.min(center, right - width / 2));
+    visualCenter = (left + right) / 2;
+    const clamped = Math.max(left + width / 2, Math.min(visualCenter, right - width / 2));
     const margin = `${(clamped - center) * 2}px`;
     if (row.style.marginLeft !== margin) row.style.marginLeft = margin;
   }
@@ -291,7 +293,8 @@
       const composer = anchor?.getBoundingClientRect();
       return { context, text: row?.getAttribute('aria-label'), font: row ? getComputedStyle(row).fontFamily : null,
         fontSize: row ? getComputedStyle(row).fontSize : null,
-        centerError: rect && composer ? Math.abs(rect.x + rect.width / 2 - composer.x - composer.width / 2) : null };
+        centerError: rect && composer ? Math.abs(rect.x + rect.width / 2 - composer.x - composer.width / 2) : null,
+        visualCenterError: rect && Number.isFinite(visualCenter) ? Math.abs(rect.x + rect.width / 2 - visualCenter) : null };
     },
     stop() {
       stopped = true;

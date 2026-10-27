@@ -87,7 +87,7 @@ test('inline rendering: center, font, themes, model/chat isolation, reload and c
     let b = await pageB.diagnostics();
     assert.equal(a.text, '200tok/s·均值200·缓存90.5%');
     assert.equal(b.text, '75tok/s·均值200·缓存90.5%');
-    assert.ok(a.centerError < 0.5);
+    assert.ok(a.visualCenterError < 0.5);
     assert.match(a.font, /Segoe UI/);
     assert.equal(a.fontSize, '13px');
     const before = await evaluate(pageA, 'document.querySelector("[data-codex-tps]").getBoundingClientRect().x');
