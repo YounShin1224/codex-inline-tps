@@ -121,13 +121,31 @@ test('long tool waits are excluded, and implicit response_item context pauses es
   assert.equal(engine.snapshot().current, 200);
 });
 
-test('zero/missing/invalid cache input is unavailable rather than a made-up zero percent', () => {
+test('zero-input calls do not change a turn cache rate; invalid counts make it unavailable', () => {
   const engine = new SessionMetrics(thread);
   completed(engine, 'a', modelA, 0, 2000, 400);
   engine.ingest(usage('a', 'new', 6000, 400, 0, 0));
-  assert.equal(engine.snapshot().cache, null);
+  assert.equal(engine.snapshot().cache, 90.5);
   engine.ingest(usage('a', 'invalid', 7000, 400, 1000, 1001));
   assert.equal(engine.snapshot().cache, null);
+});
+
+test('whole-turn cache weights every request input instead of averaging percentages', () => {
+  const engine = new SessionMetrics(thread);
+  [event('a', 'task_started', 0), context('a', modelA, 0),
+    usage('a', 'first', 2000, 400, 1000, 800), usage('a', 'second', 5000, 400, 9000, 9000)]
+    .forEach((entry) => engine.ingest(entry));
+  engine.ingest(usage('a', 'second', 5100, 400, 9000, 9000));
+  assert.equal(engine.snapshot().cache, 98);
+  assert.equal(engine.snapshot().cacheRequests, 2);
+  assert.equal(engine.snapshot().cacheInputTokens, 10000);
+  assert.equal(engine.snapshot().cacheHitTokens, 9800);
+  engine.ingest(event('a', 'task_complete', 6000));
+  assert.equal(engine.snapshot().cache, 98);
+  engine.ingest(event('b', 'task_started', 10000));
+  engine.ingest(context('b', modelA, 10000));
+  assert.equal(engine.snapshot().cache, null);
+  assert.equal(engine.snapshot().cacheRequests, 0);
 });
 
 test('incremental reader waits for complete JSONL lines and recovers after truncation', async () => {

@@ -176,7 +176,10 @@
     suffixes[2].textContent = Number.isFinite(metrics?.cache) ? '%' : '';
     const phase = metrics?.phase === 'tool' ? '工具运行中，保留最近读数。' : metrics?.estimating
       ? '生成中：第一项为本对话同模型最近五次有效响应的加权估算，完成后用本地记录修正。' : '第一项为最近一次可测量的已完成模型响应。';
-    const title = `${metrics?.model ?? '等待当前模型数据'}\n${phase}\nTPS = 官方输出 token（含思考）÷ 本地模型输出区间的合并时长；排除工具执行区间。这是本地记录推算值，并非服务器精确瞬时速度。\n均值只含本对话同模型的有效实测样本（${metrics?.samples ?? 0} 次），不足 1 秒的样本不参与。\ncache = 最近一次完成请求的缓存输入 token ÷ 输入 token。`;
+    const cacheDetails = metrics?.cacheComplete
+      ? `本轮已完成 ${metrics.cacheRequests} 次模型请求，缓存输入合计 ${metrics.cacheHitTokens}，输入合计 ${metrics.cacheInputTokens}。`
+      : '等待本轮完整的请求用量计数。';
+    const title = `${metrics?.model ?? '等待当前模型数据'}\n${phase}\nTPS = 官方输出 token（含思考）÷ 本地模型输出区间的合并时长；排除工具执行区间。这是本地记录推算值，并非服务器精确瞬时速度。\n均值只含本对话同模型的有效实测样本（${metrics?.samples ?? 0} 次），不足 1 秒的样本不参与。\ncache = 当前主会话这一轮所有已完成请求的缓存输入总和 ÷ 输入总和。${cacheDetails}`;
     if (row.title !== title) row.title = title;
     const label = text.join(' - ');
     if (row.getAttribute('aria-label') !== label) row.setAttribute('aria-label', label);

@@ -38,7 +38,7 @@ export class SessionMetrics {
 
   turn(id) {
     if (!this.turns.has(id)) this.turns.set(id, {
-      id, model: null, items: new Map(), usage: new Map(), phase: [], started: null, finished: null,
+      id, rootId: id, model: null, items: new Map(), usage: new Map(), phase: [], started: null, finished: null,
     });
     return this.turns.get(id);
   }
@@ -55,6 +55,8 @@ export class SessionMetrics {
     const turnId = p.turn_id ?? (record.type === 'event_msg' ? p.turn_attribution?.turn_id : null) ?? implicitContext;
     if (!turnId || typeof turnId !== 'string') return;
     const turn = this.turn(turnId);
+    const rootId = p.root_turn_id ?? p.turn_attribution?.root_turn_id;
+    if (typeof rootId === 'string') turn.rootId = rootId;
     const sequence = this.sequence++;
 
     // Model attribution belongs to the turn, so a switch never rewrites old samples.
@@ -120,7 +122,6 @@ export class SessionMetrics {
   snapshot(modelLabel = null) {
     const model = this.resolveModel(modelLabel);
     const samples = [];
-    let latestUsage = null;
     let latestResponse = null;
     let rejected = 0;
     const turns = [...this.turns.values()];
@@ -137,7 +138,6 @@ export class SessionMetrics {
         const valid = !usage.conflict && !ambiguousTime && !crossing && usage.output > 0
           && duration >= MIN_SAMPLE_MS && (usage.reasoning === null || (usage.reasoning >= 0 && usage.reasoning <= usage.output));
         if (turn.model === model && model) {
-          if (!latestUsage || usage.timestamp > latestUsage.timestamp) latestUsage = usage;
           const response = { ...usage, duration, valid, model };
           if (!latestResponse || usage.timestamp > latestResponse.timestamp) latestResponse = response;
           if (valid) samples.push(response);
@@ -162,14 +162,23 @@ export class SessionMetrics {
     }
     const estimating = Boolean(running && active.model === model && calls.size === 0);
     const latestValid = latestResponse?.valid ? latestResponse : null;
-    const cache = latestUsage && !latestUsage.conflict && latestUsage.input > 0
-      && latestUsage.cached >= 0 && latestUsage.cached <= latestUsage.input
-      ? latestUsage.cached / latestUsage.input * 100 : null;
+    // Cache is weighted over the current root turn, including every main-chat model/tool follow-up.
+    // A new turn starts empty; duplicate response IDs were already removed while ingesting usage.
+    const cacheTurn = active ?? turns.filter((turn) => turn.usage.size).sort((a, b) =>
+      Math.max(...b.usage.values().map((entry) => entry.timestamp)) - Math.max(...a.usage.values().map((entry) => entry.timestamp)))[0];
+    const cacheTurnId = cacheTurn?.rootId ?? null;
+    const cacheUsages = cacheTurnId ? turns.filter((turn) => turn.rootId === cacheTurnId).flatMap((turn) => [...turn.usage.values()]) : [];
+    const cacheComplete = cacheUsages.length > 0 && cacheUsages.every((usage) => !usage.conflict
+      && usage.input !== null && usage.cached !== null && usage.input >= 0 && usage.cached >= 0 && usage.cached <= usage.input);
+    const cacheInputTokens = cacheComplete ? cacheUsages.reduce((sum, usage) => sum + usage.input, 0) : null;
+    const cacheHitTokens = cacheComplete ? cacheUsages.reduce((sum, usage) => sum + usage.cached, 0) : null;
+    const cache = cacheInputTokens > 0 ? cacheHitTokens / cacheInputTokens * 100 : null;
     return {
       threadId: this.threadId, model, running, estimating,
       phase: running ? (calls.size ? 'tool' : 'generating') : 'idle',
       current: estimating ? weighted(samples.slice(-5)) : latestValid ? latestValid.output * 1000 / latestValid.duration : null,
       mean: weighted(samples), cache, samples: samples.length, rejected,
+      cacheTurnId, cacheRequests: cacheUsages.length, cacheInputTokens, cacheHitTokens, cacheComplete,
       lastSampleAt: latestValid?.timestamp ?? null, lastDurationMs: latestValid?.duration ?? null,
       warnings: [...this.warnings],
     };
