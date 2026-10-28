@@ -45,8 +45,8 @@ test('macOS detached helper: launch, authenticated IPC, inline metrics, singleto
   for (const file of ['main.mjs', 'metrics.mjs', 'cdp.mjs', 'renderer.js', 'platform.mjs', 'launch.mjs']) await copyFile(path.join(root, file), path.join(checkout, file));
   await writeFile(path.join(bundle, 'Contents', 'Info.plist'), '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.openai.codex</string><key>CFBundleExecutable</key><string>Fixture</string></dict></plist>');
   const fixture = path.join(temp, 'composer.html');
-  await writeFile(fixture, `<style>[data-composer-footer-responsive]{display:grid;grid-template-columns:auto 1fr auto} [contenteditable]{grid-column:1/-1} button{grid-row:2;grid-column:3}</style>
-    <div data-codex-composer-root><div data-composer-footer-responsive><div contenteditable="true"></div><button>GPT-6.1 Sol</button></div></div>`);
+  await writeFile(fixture, `<style>[data-composer-footer-responsive]{display:grid;grid-template-columns:auto 1fr auto} [contenteditable]{grid-column:1/-1} button{grid-row:2;grid-column:3} .permissions{grid-row:2;grid-column:1}</style>
+    <div data-codex-composer-root><div data-composer-footer-responsive><div contenteditable="true"></div><span class="permissions">Full access</span><button>GPT-6.1 Sol</button></div></div>`);
   await writeFile(executable, '#!/bin/sh\nexec ' + quote(chrome) + ' --headless=new --disable-background-networking --no-first-run --no-default-browser-check '
     + quote('--user-data-dir=' + path.join(temp, 'isolated-browser')) + ' "$@" ' + quote(pathToFileURL(fixture).href + '#/local/' + thread) + '\n', { mode: 0o755 });
   const record = (timestamp, type, payload) => ({ timestamp: new Date(timestamp).toISOString(), type, payload: { thread_id: thread, turn_id: turn, ...payload } });
@@ -94,6 +94,7 @@ test('macOS detached helper: launch, authenticated IPC, inline metrics, singleto
   const countRows = async () => (await page.call('Runtime.evaluate', { expression: 'document.querySelectorAll("[data-codex-tps]").length', returnByValue: true })).result.value;
   assert.equal(await countRows(), 1);
   assert.equal(JSON.parse((await command('diagnostics')).stdout).views[0].view.text, '200tok/s·均值200·缓存90.00%');
+  await until(async () => JSON.parse((await command('diagnostics')).stdout).views[0].view.visible, 'Helper did not reveal the row after its layout settled');
   assert.equal(JSON.parse((await command('stop')).stdout).phase, 'stopping');
   await until(async () => (await status()).phase === 'not-running', 'Helper did not stop');
   assert.equal(await countRows(), 0);

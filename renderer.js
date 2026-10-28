@@ -23,6 +23,24 @@
   let originalPosition = '';
   let visualCenter = null;
   let verticalOffset = 0;
+  let layoutSignature = null;
+  let layoutChangedAt = 0;
+  let readiness = 'waiting-for-data';
+  let observedLayout = [];
+  const layoutObserver = new ResizeObserver(() => invalidateLayout());
+
+  function hideRow() {
+    if (!row) return;
+    row.style.visibility = 'hidden';
+    row.setAttribute('aria-hidden', 'true');
+  }
+
+  function invalidateLayout() {
+    layoutSignature = null;
+    readiness = 'waiting-for-layout';
+    hideRow();
+    schedule();
+  }
 
   // Route parsing is per renderer/window. No globally most-recent chat is ever substituted.
   const threadFromLocation = () => {
@@ -83,7 +101,8 @@
     element.dataset.codexTps = 'true';
     element.setAttribute('role', 'status');
     element.setAttribute('aria-live', 'off');
-    element.style.cssText = 'position:absolute;display:block;box-sizing:border-box;width:max-content;height:20px;margin:0;padding:0;grid-column:1 / -1;grid-row:2;align-self:center;justify-self:center;z-index:2;text-align:center;pointer-events:auto;cursor:default;user-select:text;overflow:hidden;';
+    element.style.cssText = 'position:absolute;display:block;visibility:hidden;box-sizing:border-box;width:max-content;height:20px;margin:0;padding:0;grid-column:1 / -1;grid-row:2;align-self:center;justify-self:center;z-index:2;text-align:center;pointer-events:auto;cursor:default;user-select:text;overflow:hidden;';
+    element.setAttribute('aria-hidden', 'true');
     const grid = document.createElement('span');
     grid.style.cssText = 'display:inline-flex;align-items:center;column-gap:2px;font:inherit;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:20px;';
     for (let i = 0; i < 5; i++) {
@@ -147,21 +166,27 @@
   function releaseHost() {
     if (positionedHost && positionedHost.style.position === 'relative') positionedHost.style.position = originalPosition;
     positionedHost = null;
+    layoutObserver.disconnect();
+    observedLayout = [];
+    layoutSignature = null;
   }
 
   function syncPlacement(composer) {
     const host = composer.mount;
     const nativeModel = host.querySelector('[class*="ModelPickerTriggerModelText"]')?.closest('button')
-      ?? [...host.querySelectorAll('button')].find((button) => MODEL.test(button.textContent));
+      ?? [...host.querySelectorAll('button')].find((button) => visible(button) && MODEL.test(button.textContent));
+    if (!nativeModel || !visible(nativeModel)) return null;
     let controlCell = nativeModel;
     while (controlCell?.parentElement && controlCell.parentElement !== host) controlCell = controlCell.parentElement;
-    const nativeRow = controlCell ? getComputedStyle(controlCell).gridRowStart : '2';
+    const nativeRow = controlCell ? getComputedStyle(controlCell).gridRowStart : null;
+    if (!/^\d+$/.test(nativeRow ?? '')) return null;
     if (row.style.gridRow !== nativeRow && /^\d+$/.test(nativeRow)) row.style.gridRow = nativeRow;
 
     // Center in the actual gap between controls so unequal left/right button widths feel balanced.
     const bounds = host.getBoundingClientRect();
-    const modelBounds = nativeModel?.getBoundingClientRect();
-    const centerY = modelBounds ? modelBounds.y + modelBounds.height / 2 : bounds.bottom - 14;
+    const modelBounds = nativeModel.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0 || modelBounds.width <= 0 || modelBounds.height <= 0) return null;
+    const centerY = modelBounds.y + modelBounds.height / 2;
     const leftCell = [...host.children].find((element) => element !== row
       && getComputedStyle(element).gridColumnStart === '1'
       && getComputedStyle(element).gridRowStart === nativeRow
@@ -171,6 +196,7 @@
       .filter((element) => visible(element) && Math.abs(element.getBoundingClientRect().y + element.getBoundingClientRect().height / 2 - centerY) < 8);
     const right = (rightControls.length ? Math.min(...rightControls.map((element) => element.getBoundingClientRect().left)) : bounds.right) - 8;
     const available = Math.max(0, right - left);
+    if (!leftCell || !visible(leftCell) || available <= 0) return null;
     row.style.maxWidth = `${available}px`;
     const width = Math.min(row.firstElementChild.getBoundingClientRect().width, available);
     const center = bounds.x + bounds.width / 2;
@@ -185,6 +211,42 @@
       verticalOffset = offset;
       row.style.transform = `translateY(${offset}px)`;
     }
+    const targets = [host, nativeModel, leftCell];
+    if (targets.some((element, index) => element !== observedLayout[index])) {
+      layoutObserver.disconnect();
+      targets.forEach((element) => layoutObserver.observe(element));
+      observedLayout = targets;
+    }
+    // A transient native grid/model-picker layout must settle before the row is revealed.
+    const geometry = [bounds.x, bounds.y, bounds.width, bounds.height, modelBounds.x, modelBounds.y,
+      modelBounds.width, modelBounds.height, left, right, row.firstElementChild.getBoundingClientRect().width];
+    return JSON.stringify(geometry.map((value) => Math.round(value * 64) / 64));
+  }
+
+  function syncVisibility(context, placement) {
+    const dataReady = context.modelLabel && metrics?.model && metrics.threadId === context.threadId
+      && [metrics.current, metrics.mean, metrics.cache].every((value) => Number.isFinite(value) && value >= 0)
+      && metrics.cache <= 100;
+    if (!dataReady || !placement) {
+      readiness = dataReady ? 'waiting-for-layout' : 'waiting-for-data';
+      layoutSignature = null;
+      hideRow();
+      return;
+    }
+    const signature = `${context.threadId}|${context.modelLabel}|${lastStyle}|${placement}`;
+    if (signature !== layoutSignature) {
+      layoutSignature = signature;
+      layoutChangedAt = performance.now();
+    }
+    if (performance.now() - layoutChangedAt < 120) {
+      readiness = 'layout-settling';
+      hideRow();
+      schedule();
+      return;
+    }
+    readiness = 'ready';
+    row.style.visibility = 'visible';
+    row.removeAttribute('aria-hidden');
   }
 
   function paint() {
@@ -278,7 +340,8 @@
     if (previous && (previous.threadId !== threadId || previous.modelLabel !== context.modelLabel)) metrics = null;
     syncStyle(composer);
     paint();
-    syncPlacement(composer);
+    const placement = syncPlacement(composer);
+    syncVisibility(context, placement);
     context.mounted = true;
     publish(context);
   }
@@ -286,13 +349,19 @@
   // Changes inside our own row are ignored, preventing a MutationObserver/render feedback loop.
   const schedule = () => { if (!stopped && frame === null) frame = setTimeout(reconcile, 100); };
   const observer = new MutationObserver((records) => {
-    if (records.some((record) => !record.target.closest?.('[data-codex-tps]'))) schedule();
+    const external = records.filter((record) => !record.target.closest?.('[data-codex-tps]'));
+    if (!external.length) return;
+    if (external.some((record) => {
+      const element = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+      return !row?.isConnected || (mountPoint && (mountPoint.contains(element) || element?.contains(mountPoint)));
+    })) invalidateLayout();
+    else schedule();
   });
   observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
   const timer = setInterval(schedule, 750);
-  addEventListener('popstate', schedule);
-  addEventListener('hashchange', schedule);
-  addEventListener('resize', schedule);
+  addEventListener('popstate', invalidateLayout);
+  addEventListener('hashchange', invalidateLayout);
+  addEventListener('resize', invalidateLayout);
 
   // Stop removes all observers and DOM owned by this component; the native composer is untouched.
   globalThis.__codexTps = {
@@ -300,15 +369,17 @@
       if (next?.threadId !== threadFromLocation()) return;
       if ((next.modelLabel ?? null) !== modelLabel(findComposer())) return;
       metrics = next;
-      paint();
-      schedule();
+      // Apply data, positioning and visibility in one task so no unpositioned frame is painted.
+      if (frame !== null) clearTimeout(frame);
+      reconcile();
     },
     refresh: schedule,
     diagnostics() {
       const context = lastContext ? JSON.parse(lastContext) : null;
       const rect = row?.getBoundingClientRect();
       const composer = anchor?.getBoundingClientRect();
-      return { context, text: row?.getAttribute('aria-label'), font: row ? getComputedStyle(row).fontFamily : null,
+      return { context, text: row?.getAttribute('aria-label'), visible: Boolean(row && getComputedStyle(row).visibility === 'visible'), readiness,
+        font: row ? getComputedStyle(row).fontFamily : null,
         fontSize: row ? getComputedStyle(row).fontSize : null,
         centerError: rect && composer ? Math.abs(rect.x + rect.width / 2 - composer.x - composer.width / 2) : null,
         visualCenterError: rect && Number.isFinite(visualCenter) ? Math.abs(rect.x + rect.width / 2 - visualCenter) : null };
@@ -316,11 +387,12 @@
     stop() {
       stopped = true;
       observer.disconnect();
+      layoutObserver.disconnect();
       clearInterval(timer);
       if (frame !== null) clearTimeout(frame);
-      removeEventListener('popstate', schedule);
-      removeEventListener('hashchange', schedule);
-      removeEventListener('resize', schedule);
+      removeEventListener('popstate', invalidateLayout);
+      removeEventListener('hashchange', invalidateLayout);
+      removeEventListener('resize', invalidateLayout);
       row?.remove();
       releaseHost();
       delete globalThis.__codexTps;
