@@ -1,5 +1,8 @@
 import { open, stat } from 'node:fs/promises';
 import { StringDecoder } from 'node:string_decoder';
+import { createReadStream } from 'node:fs';
+import { createZstdDecompress, createGunzip } from 'node:zlib';
+import { pipeline } from 'node:stream/promises';
 
 // Only numeric metadata is retained. Conversation text and tool arguments are discarded.
 const MODEL_ITEM_TYPES = new Set(['Reasoning', 'AgentMessage']);
@@ -38,7 +41,7 @@ export class SessionMetrics {
 
   turn(id) {
     if (!this.turns.has(id)) this.turns.set(id, {
-      id, rootId: id, model: null, items: new Map(), usage: new Map(), phase: [], started: null, finished: null,
+      id, rootId: id, model: null, items: new Map(), completions: new Map(), usage: new Map(), phase: [], started: null, finished: null,
     });
     return this.turns.get(id);
   }
@@ -76,6 +79,10 @@ export class SessionMetrics {
     } else if (record.type === 'event_msg' && p.type === 'item_completed' && MODEL_ITEM_TYPES.has(p.item?.type)) {
       const start = number(p.started_at_ms);
       const end = number(p.completed_at_ms);
+      if (end !== null && typeof p.item.id === 'string') {
+        const old = turn.completions.get(p.item.id);
+        turn.completions.set(p.item.id, { start, end, conflict: Boolean(old?.conflict || (old && (old.start !== start || old.end !== end))) });
+      }
       if (start !== null && end !== null && end >= start && typeof p.item.id === 'string') {
         const old = turn.items.get(p.item.id);
         if (old && (old[0] !== start || old[1] !== end)) this.warnings.add('conflicting-item');
@@ -122,6 +129,7 @@ export class SessionMetrics {
   snapshot(modelLabel = null) {
     const model = this.resolveModel(modelLabel);
     const samples = [];
+    const responseSamples = [];
     let latestResponse = null;
     let rejected = 0;
     const turns = [...this.turns.values()];
@@ -137,16 +145,33 @@ export class SessionMetrics {
         const duration = unionDuration(windows);
         const valid = !usage.conflict && !ambiguousTime && !crossing && usage.output > 0
           && duration >= MIN_SAMPLE_MS && (usage.reasoning === null || (usage.reasoning >= 0 && usage.reasoning <= usage.output));
+        // Older Codex logs record output completion but no generation start. Keep a separate,
+        // explicitly approximate response-window rate; never mix it into measured model TPS.
+        const completions = [...turn.completions.values()].filter((entry) => entry.end > boundary && entry.end <= usage.timestamp);
+        const responseEnd = completions.length ? Math.max(...completions.map((entry) => entry.end)) : usage.timestamp;
+        const previousToolResults = turn.phase.filter((entry) => entry.kind === 'tool-end' && entry.timestamp > boundary
+          && entry.timestamp < responseEnd && turn.phase.some((start) => start.kind === 'tool-start'
+            && start.callId === entry.callId && start.timestamp <= boundary));
+        const responseStart = Math.max(boundary, ...previousToolResults.map((entry) => entry.timestamp));
+        const responseDuration = responseEnd - responseStart;
+        const approximateValid = !usage.conflict && !ambiguousTime && !crossing && usage.output > 0
+          && Number.isFinite(responseStart) && responseDuration >= MIN_SAMPLE_MS
+          && completions.every((entry) => entry.start === null && !entry.conflict && entry.end >= responseStart)
+          && (usage.reasoning === null || (usage.reasoning >= 0 && usage.reasoning <= usage.output));
         if (turn.model === model && model) {
-          const response = { ...usage, duration, valid, model };
+          const response = { ...usage, duration: valid ? duration : responseDuration, valid: valid || approximateValid, model };
           if (!latestResponse || usage.timestamp > latestResponse.timestamp) latestResponse = response;
           if (valid) samples.push(response);
+          else if (approximateValid) responseSamples.push(response);
           else rejected++;
         }
         boundary = usage.timestamp;
       }
     }
     samples.sort((a, b) => a.timestamp - b.timestamp);
+    responseSamples.sort((a, b) => a.timestamp - b.timestamp);
+    const selectedSamples = samples.length ? samples : responseSamples;
+    const approximate = !samples.length && responseSamples.length > 0;
 
     // Estimates use only completed valid responses from this thread and this model.
     const weighted = (entries) => entries.length
@@ -161,7 +186,7 @@ export class SessionMetrics {
       if (event.kind === 'tool-end') calls.delete(event.callId);
     }
     const estimating = Boolean(running && active.model === model && calls.size === 0);
-    const latestValid = samples.at(-1) ?? null;
+    const latestValid = selectedSamples.at(-1) ?? null;
     const held = Boolean(!estimating && latestValid && latestResponse?.responseId !== latestValid.responseId);
     // Cache is weighted over the current root turn, including every main-chat model/tool follow-up.
     // A new turn starts empty; duplicate response IDs were already removed while ingesting usage.
@@ -175,10 +200,12 @@ export class SessionMetrics {
     const cacheHitTokens = cacheComplete ? cacheUsages.reduce((sum, usage) => sum + usage.cached, 0) : null;
     const cache = cacheInputTokens > 0 ? cacheHitTokens / cacheInputTokens * 100 : null;
     return {
-      threadId: this.threadId, model, running, estimating, held,
+      threadId: this.threadId, model, running, estimating, held, approximate,
+      timing: selectedSamples.length ? (approximate ? 'response-window' : 'model-output') : null,
       phase: running ? (calls.size ? 'tool' : 'generating') : 'idle',
-      current: estimating ? weighted(samples.slice(-5)) : latestValid ? latestValid.output * 1000 / latestValid.duration : null,
-      mean: weighted(samples), cache, samples: samples.length, rejected,
+      current: estimating ? weighted(selectedSamples.slice(-5)) : latestValid ? latestValid.output * 1000 / latestValid.duration : null,
+      mean: weighted(selectedSamples), cache, samples: selectedSamples.length, measuredSamples: samples.length,
+      approximateSamples: responseSamples.length, rejected,
       cacheTurnId, cacheRequests: cacheUsages.length, cacheInputTokens, cacheHitTokens, cacheComplete,
       lastSampleAt: latestValid?.timestamp ?? null, lastDurationMs: latestValid?.duration ?? null,
       warnings: [...this.warnings],
@@ -200,10 +227,32 @@ export class RolloutReader {
     this.decoder = new StringDecoder('utf8');
     this.engine = new SessionMetrics(this.threadId);
     this.identity = null;
+    this.compressedSignature = null;
+  }
+
+  consume(buffer) {
+    const text = this.pending + this.decoder.write(buffer);
+    const lines = text.split('\n');
+    this.pending = lines.pop();
+    for (const line of lines) {
+      try { this.engine.ingest(JSON.parse(line)); }
+      catch { this.engine.warnings.add('invalid-json-line'); }
+    }
   }
 
   async poll() {
     const info = await stat(this.path);
+    if (/\.jsonl\.(?:zst|gz)$/.test(this.path)) {
+      const signature = `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}`;
+      if (signature === this.compressedSignature) return this.engine;
+      this.reset();
+      const decoder = this.path.endsWith('.zst') ? createZstdDecompress() : createGunzip();
+      await pipeline(createReadStream(this.path), decoder, async (chunks) => {
+        for await (const chunk of chunks) this.consume(chunk);
+      });
+      this.compressedSignature = signature;
+      return this.engine;
+    }
     const identity = `${info.dev}:${info.ino}`;
     if ((this.identity && identity !== this.identity) || info.size < this.offset) this.reset();
     this.identity = identity;
@@ -215,13 +264,7 @@ export class RolloutReader {
         const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, info.size - this.offset), this.offset);
         if (!bytesRead) break;
         this.offset += bytesRead;
-        const text = this.pending + this.decoder.write(buffer.subarray(0, bytesRead));
-        const lines = text.split('\n');
-        this.pending = lines.pop();
-        for (const line of lines) {
-          try { this.engine.ingest(JSON.parse(line)); }
-          catch { this.engine.warnings.add('invalid-json-line'); }
-        }
+        this.consume(buffer.subarray(0, bytesRead));
       }
     } finally { await handle.close(); }
     return this.engine;

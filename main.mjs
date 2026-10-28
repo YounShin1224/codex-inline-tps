@@ -62,7 +62,8 @@ class Sessions {
   async walk(directory, threadId) {
     let entries;
     try { entries = await readdir(directory, { withFileTypes: true }); } catch { return null; }
-    const file = entries.find((entry) => entry.isFile() && entry.name.endsWith(`-${threadId}.jsonl`));
+    const file = ['', '.zst', '.gz'].map((suffix) => entries.find((entry) => entry.isFile()
+      && entry.name.endsWith(`-${threadId}.jsonl${suffix}`))).find(Boolean);
     if (file) return path.join(directory, file.name);
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
@@ -74,6 +75,14 @@ class Sessions {
 
   async engine(threadId) {
     let reader = this.readers.get(threadId);
+    if (reader && /\.jsonl\.(?:zst|gz)$/.test(reader.path)) {
+      // Resuming an archived chat can create a live JSONL beside the compressed history.
+      const live = reader.path.replace(/\.(?:zst|gz)$/, '');
+      if (await stat(live).then((info) => info.isFile(), () => false)) {
+        reader = new RolloutReader(live, threadId);
+        this.readers.set(threadId, reader);
+      }
+    }
     if (!reader) {
       if (Date.now() - (this.missing.get(threadId) ?? 0) < 1500) return null;
       const file = await this.locate(threadId);

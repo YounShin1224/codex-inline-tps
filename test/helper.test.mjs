@@ -9,6 +9,7 @@ import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Cdp } from '../cdp.mjs';
 import { controlEndpoint, isAlive } from '../platform.mjs';
+import { zstdCompressSync } from 'node:zlib';
 
 const exec = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -57,7 +58,7 @@ test('macOS detached helper: launch, authenticated IPC, inline metrics, singleto
     record(4100, 'token_usage_record', { response_id: 'response', usage: { input_tokens: 1000, cached_input_tokens: 900, output_tokens: 400, reasoning_output_tokens: 0 } }),
     record(4200, 'event_msg', { type: 'task_complete' }),
   ];
-  await writeFile(path.join(codexHome, 'sessions', `rollout-${thread}.jsonl`), records.map(JSON.stringify).join('\n') + '\n');
+  await writeFile(path.join(codexHome, 'sessions', `rollout-${thread}.jsonl.zst`), zstdCompressSync(Buffer.from(records.map(JSON.stringify).join('\n') + '\n')));
   const command = (name, ...args) => exec(process.execPath, [path.join(checkout, 'launch.mjs'), name, ...args], { env });
   const status = async () => JSON.parse((await command('status')).stdout);
   const until = async (check, message) => {
@@ -95,6 +96,15 @@ test('macOS detached helper: launch, authenticated IPC, inline metrics, singleto
   assert.equal(await countRows(), 1);
   assert.equal(JSON.parse((await command('diagnostics')).stdout).views[0].view.text, '200tok/s·均值200·缓存90.00%');
   await until(async () => JSON.parse((await command('diagnostics')).stdout).views[0].view.visible, 'Helper did not reveal the row after its layout settled');
+  const resumed = [
+    record(10000, 'turn_context', { turn_id: 'resumed', model: 'gpt-6.1-sol' }),
+    record(11000, 'event_msg', { turn_id: 'resumed', type: 'task_started' }),
+    record(14000, 'event_msg', { turn_id: 'resumed', type: 'item_completed', started_at_ms: 12000, completed_at_ms: 14000, item: { id: 'resumed-answer', type: 'AgentMessage' } }),
+    record(14100, 'token_usage_record', { turn_id: 'resumed', response_id: 'resumed-response', usage: { input_tokens: 1000, cached_input_tokens: 900, output_tokens: 600, reasoning_output_tokens: 0 } }),
+    record(14200, 'event_msg', { turn_id: 'resumed', type: 'task_complete' }),
+  ];
+  await writeFile(path.join(codexHome, 'sessions', `rollout-${thread}.jsonl`), [...records, ...resumed].map(JSON.stringify).join('\n') + '\n');
+  await until(async () => (await status()).windows[0]?.metrics?.current === 300, 'Resumed live JSONL must replace the compressed history reader');
   assert.equal(JSON.parse((await command('stop')).stdout).phase, 'stopping');
   await until(async () => (await status()).phase === 'not-running', 'Helper did not stop');
   assert.equal(await countRows(), 0);

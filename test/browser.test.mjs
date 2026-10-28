@@ -97,6 +97,12 @@ test('inline rendering: center, font, themes, model/chat isolation, reload and c
     assert.ok(a.visualCenterError < 0.5);
     assert.match(a.font, /Segoe UI/);
     assert.equal(a.fontSize, '13px');
+    await pageA.update({ ...reading(A, 100), approximate: true });
+    await ready(pageA);
+    assert.equal((await pageA.diagnostics()).text, '≈100tok/s·均值≈200·缓存90.50%');
+    assert.ok(await evaluate(pageA, 'document.querySelector("[data-codex-tps]").title.includes("响应平均速度估算")'));
+    await pageA.update(reading(A, 200));
+    await ready(pageA);
     // Ordinary editor/caret mutations and task-hover decorations are not loading signals.
     const steady = await pageA.cdp.call('Runtime.evaluate', { awaitPromise: true, returnByValue: true, expression: `(async()=>{
       const row=document.querySelector('[data-codex-tps]'), editor=document.querySelector('[contenteditable]');

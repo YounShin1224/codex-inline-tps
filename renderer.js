@@ -269,11 +269,12 @@
       cacheValue = ordinary === '100.00' && !fullHit ? '<100.00' : ordinary;
     }
     const text = [
-      tps(metrics?.current),
-      `均值${Number.isFinite(metrics?.mean) ? Math.round(metrics.mean) : '—'}`,
+      `${metrics?.approximate ? '≈' : ''}${tps(metrics?.current)}`,
+      `均值${metrics?.approximate ? '≈' : ''}${Number.isFinite(metrics?.mean) ? Math.round(metrics.mean) : '—'}`,
       `缓存${Number.isFinite(metrics?.cache) ? cacheValue + '%' : '—'}`,
     ];
-    const numeric = [metrics?.current, metrics?.mean].map((value) => Number.isFinite(value) ? String(Math.round(value)) : '—');
+    const numeric = [metrics?.current, metrics?.mean].map((value) => Number.isFinite(value)
+      ? `${metrics?.approximate ? '≈' : ''}${Math.round(value)}` : '—');
     numeric.push(cacheValue);
     digits.forEach((element, index) => { if (element.textContent !== numeric[index]) element.textContent = numeric[index]; });
     suffixes[2].textContent = Number.isFinite(metrics?.cache) ? '%' : '';
@@ -281,11 +282,14 @@
       ? '生成中：第一项为本对话同模型最近五次有效响应的加权估算，完成后用本地记录修正。'
       : metrics?.held ? '最新响应没有有效计时，当前保留最近一次有效模型响应的读数。' : '第一项为最近一次可测量的已完成模型响应。';
     const measuredAt = Number.isFinite(metrics?.lastSampleAt)
-      ? `\n最近有效样本：${new Date(metrics.lastSampleAt).toLocaleTimeString('zh-CN', { hour12: false })}，输出区间 ${(metrics.lastDurationMs / 1000).toFixed(2)} 秒。` : '';
+      ? `\n最近有效样本：${new Date(metrics.lastSampleAt).toLocaleTimeString('zh-CN', { hour12: false })}，${metrics.approximate ? '响应' : '输出'}区间 ${(metrics.lastDurationMs / 1000).toFixed(2)} 秒。` : '';
     const cacheDetails = metrics?.cacheComplete
       ? `本轮已完成 ${metrics.cacheRequests} 次模型请求，缓存输入合计 ${metrics.cacheHitTokens}，输入合计 ${metrics.cacheInputTokens}。`
       : '等待本轮完整的请求用量计数。';
-    const title = `${metrics?.model ?? '等待当前模型数据'}\n${phase}${measuredAt}\nTPS = 官方输出 token（含思考）÷ 本地模型输出区间的合并时长；排除工具执行区间。这是本地记录推算值，并非服务器精确瞬时速度。\n均值只含本对话同模型的有效实测样本（${metrics?.samples ?? 0} 次），不足 1 秒的样本不参与。\n缓存 = 当前主会话这一轮所有已完成请求的缓存输入总和 ÷ 输入总和。${cacheDetails}`;
+    const formula = metrics?.approximate
+      ? '≈ 表示旧日志缺少生成起始时间：官方输出 token ÷ 请求开始（或上次工具返回）到输出完成/用量回报的响应时长，可能含排队、首 token 等待及用量回报延迟，属于响应平均速度估算，不是模型纯生成 TPS。只与同口径样本统计均值。'
+      : 'TPS = 官方输出 token（含思考）÷ 本地模型输出区间的合并时长；排除工具执行区间。这是本地记录推算值，并非服务器精确瞬时速度。';
+    const title = `${metrics?.model ?? '等待当前模型数据'}\n${phase}${measuredAt}\n${formula}\n均值只含本对话同模型、同口径的有效样本（${metrics?.samples ?? 0} 次），不足 1 秒的样本不参与。\n缓存 = 当前主会话这一轮所有已完成请求的缓存输入总和 ÷ 输入总和。${cacheDetails}`;
     if (row.title !== title) row.title = title;
     const label = text.join('·');
     if (row.getAttribute('aria-label') !== label) row.setAttribute('aria-label', label);
