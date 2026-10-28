@@ -97,6 +97,20 @@ test('inline rendering: center, font, themes, model/chat isolation, reload and c
     assert.ok(a.visualCenterError < 0.5);
     assert.match(a.font, /Segoe UI/);
     assert.equal(a.fontSize, '13px');
+    // Ordinary editor/caret mutations and task-hover decorations are not loading signals.
+    const steady = await pageA.cdp.call('Runtime.evaluate', { awaitPromise: true, returnByValue: true, expression: `(async()=>{
+      const row=document.querySelector('[data-codex-tps]'), editor=document.querySelector('[contenteditable]');
+      const hidden=[];const observer=new MutationObserver(()=>{if(getComputedStyle(row).visibility!=='visible')hidden.push(true)});
+      observer.observe(row,{attributes:true,attributeFilter:['style','aria-hidden']});
+      for(let i=0;i<4;i++){
+        editor.textContent+='a';editor.dataset.caret=String(i);document.body.dataset.hoverTask=String(i);
+        await new Promise(resolve=>setTimeout(resolve,80));
+      }
+      document.querySelector('main').style.width='600px';
+      await new Promise(resolve=>setTimeout(resolve,300));observer.disconnect();
+      return {hidden:hidden.length,visible:getComputedStyle(row).visibility==='visible'};
+    })()` });
+    assert.deepEqual(steady.result.value, { hidden: 0, visible: true }, 'Typing, task hover and valid resizing must not blink the row');
     await pageA.update({ ...reading(A, 200), cache: null });
     assert.equal((await pageA.diagnostics()).visible, false, 'Incomplete cache data must hide the whole row');
     await pageA.update({ ...reading(A, 200), current: null });

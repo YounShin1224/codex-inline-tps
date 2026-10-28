@@ -27,7 +27,7 @@
   let layoutChangedAt = 0;
   let readiness = 'waiting-for-data';
   let observedLayout = [];
-  const layoutObserver = new ResizeObserver(() => invalidateLayout());
+  const layoutObserver = new ResizeObserver(() => reconcileNow());
 
   function hideRow() {
     if (!row) return;
@@ -40,6 +40,12 @@
     readiness = 'waiting-for-layout';
     hideRow();
     schedule();
+  }
+
+  function reconcileNow() {
+    if (stopped) return;
+    if (frame !== null) clearTimeout(frame);
+    reconcile();
   }
 
   // Route parsing is per renderer/window. No globally most-recent chat is ever substituted.
@@ -238,7 +244,9 @@
       layoutSignature = signature;
       layoutChangedAt = performance.now();
     }
-    if (performance.now() - layoutChangedAt < 120) {
+    // Settle only before revealing a hidden/new row. Once ready, valid geometry updates
+    // (typing, caret/focus styling, hover and resizing) reposition it without blinking.
+    if (row.style.visibility !== 'visible' && performance.now() - layoutChangedAt < 120) {
       readiness = 'layout-settling';
       hideRow();
       schedule();
@@ -351,17 +359,17 @@
   const observer = new MutationObserver((records) => {
     const external = records.filter((record) => !record.target.closest?.('[data-codex-tps]'));
     if (!external.length) return;
-    if (external.some((record) => {
-      const element = record.target.nodeType === 1 ? record.target : record.target.parentElement;
-      return !row?.isConnected || (mountPoint && (mountPoint.contains(element) || element?.contains(mountPoint)));
-    })) invalidateLayout();
+    const previous = lastContext ? JSON.parse(lastContext) : null;
+    const composer = findComposer();
+    if (!row?.isConnected || previous?.threadId !== threadFromLocation()
+      || previous?.modelLabel !== modelLabel(composer)) invalidateLayout();
     else schedule();
   });
   observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
   const timer = setInterval(schedule, 750);
   addEventListener('popstate', invalidateLayout);
   addEventListener('hashchange', invalidateLayout);
-  addEventListener('resize', invalidateLayout);
+  addEventListener('resize', reconcileNow);
 
   // Stop removes all observers and DOM owned by this component; the native composer is untouched.
   globalThis.__codexTps = {
@@ -370,8 +378,7 @@
       if ((next.modelLabel ?? null) !== modelLabel(findComposer())) return;
       metrics = next;
       // Apply data, positioning and visibility in one task so no unpositioned frame is painted.
-      if (frame !== null) clearTimeout(frame);
-      reconcile();
+      reconcileNow();
     },
     refresh: schedule,
     diagnostics() {
@@ -392,7 +399,7 @@
       if (frame !== null) clearTimeout(frame);
       removeEventListener('popstate', invalidateLayout);
       removeEventListener('hashchange', invalidateLayout);
-      removeEventListener('resize', invalidateLayout);
+      removeEventListener('resize', reconcileNow);
       row?.remove();
       releaseHost();
       delete globalThis.__codexTps;

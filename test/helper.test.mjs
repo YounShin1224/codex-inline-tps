@@ -36,7 +36,7 @@ test('macOS detached helper: launch, authenticated IPC, inline metrics, singleto
     page?.close();
     if (helperPid && isAlive(helperPid)) process.kill(helperPid, 'SIGTERM');
     if (browserPid && isAlive(browserPid)) process.kill(browserPid, 'SIGTERM');
-    await rm(temp, { recursive: true, force: true });
+    await rm(temp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     await rm(endpoint.directory, { recursive: true, force: true });
   });
   await mkdir(checkout);
