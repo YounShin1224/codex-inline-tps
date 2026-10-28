@@ -12,6 +12,32 @@
 
 ## 启动和停止
 
+### macOS
+
+需要 **Node.js 24 或更新版本**和已安装的 Codex 桌面版。双击 **启动 Codex TPS.command**，或在终端执行：
+
+```sh
+npm run start:mac
+```
+
+启动器按应用标识 `com.openai.codex` 查找当前运行的应用、`/Applications`、`~/Applications` 和 Spotlight，兼容 `Codex.app`、新版的 `ChatGPT.app` 以及重命名的安装。它不会把普通 ChatGPT 应用误认为 Codex。应用装在其他位置时可明确指定：
+
+```sh
+node launch.mjs start --app '/path/to/Codex.app'
+```
+
+也可设置 `CODEX_TPS_APP`。会话目录继续遵循 `CODEX_HOME`，默认 `~/.codex`。
+
+**如果 Codex 正在运行，助手会等待你保存工作后用 `Cmd+Q` 正常退出，然后自动重新打开并接入。** 关闭窗口不等于退出应用。不会强制结束当前任务。重复启动会复用助手；停止后如果带调试端口的 Codex 仍在运行，再次启动可重新接入。
+
+双击 **停止 Codex TPS.command**，或运行 `npm run stop`，移除状态行并退出助手，Codex 保持打开。运行 `npm run status` 或 `node launch.mjs diagnostics` 查看状态。若要同时关闭调试端口，停止后正常退出 Codex，再从原来的应用入口打开。
+
+`.command` 会查找 PATH、Homebrew 和 `~/.local/bin` 下的 Node.js。若 Node.js 由 nvm、fnm 等工具管理，请在已激活 Node.js 24+ 的终端执行 `npm run start:mac`。下载方式丢失可执行权限时，在本目录执行 `chmod +x *.command`。
+
+助手以独立后台进程运行，不注册登录项或 LaunchAgent，不修改应用包、签名、模型提供商或代理设置。macOS 使用权限为 `0700` 的短临时目录保存 Unix 控制 socket，避免长仓库路径触发系统限制；控制密钥和诊断仍在 `.runtime/`。删除前先停止助手，再删除本文件夹。
+
+### Windows
+
 双击 **启动 Codex TPS.vbs**。如果 Codex 已经打开，辅助程序等待你通过系统托盘正常退出 Codex，然后自动重新打开。不要只关窗口；应用可能仍在托盘运行。
 
 启动入口通过 Windows 本地进程服务独立启动辅助程序，使它不会随调用它的 Codex 执行环境退出。此操作不创建计划任务或开机启动项。
@@ -41,6 +67,8 @@
 需要已有 Node.js 24 或更新版本；本机启动脚本自动从 PATH 查找。无第三方运行时依赖，不需要 API Key。
 
 - `main.mjs`：启动、调试连接、按窗口绑定、只读跟踪会话文件。
+- `platform.mjs`：macOS 应用身份校验、进程定位、跨平台控制端点和启动锁。
+- `launch.mjs`、`*.command`：macOS 独立后台启动和停止入口。
 - `metrics.mjs`：token、计时区间、模型归属和均值计算。
 - `renderer.js`：继承原生样式的内嵌状态行。
 - `cdp.mjs`：本地调试协议连接与隔离环境。
@@ -48,7 +76,7 @@
 
 如需查看运行状态，可在此目录打开 PowerShell，执行 `node main.mjs status`；`node main.mjs diagnostics` 还会返回字体和居中误差等只读信息。
 
-这是依赖 Codex 内部界面标记的实验性工具，不是官方扩展。仓库提供解析和独立浏览器的组件检查；真实 Codex 多窗口行为和应用升级后的兼容性仍需使用者验证。运行检查可使用 `npm test`，浏览器检查需要本机 Edge 或 Chrome。
+这是依赖 Codex 内部界面标记的实验性工具，不是官方扩展。仓库提供解析、macOS 启动/控制逻辑和独立浏览器的组件检查；真实 Codex 多窗口行为和应用升级后的兼容性仍需使用者验证。运行检查可使用 `npm test`，浏览器检查会自动寻找 macOS 的 Chrome/Edge、Windows 的 Chrome/Edge 或 Linux 的 Chromium，也可用 `CODEX_TPS_TEST_BROWSER` 指定浏览器可执行文件。测试使用独立临时浏览器配置，不操作现有浏览器或 Codex 窗口。
 
 ## 开源协议
 

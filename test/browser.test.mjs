@@ -27,6 +27,9 @@ body.dark { background:#202020; color:#eee; --color-text-secondary:#aaa; } body.
 
 async function findBrowser() {
   const candidates = [process.env.CODEX_TPS_TEST_BROWSER,
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome',
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'];
   for (const candidate of candidates.filter(Boolean)) { try { await access(candidate); return candidate; } catch {} }
@@ -92,14 +95,17 @@ test('inline rendering: center, font, themes, model/chat isolation, reload and c
     assert.equal(a.fontSize, '13px');
     const before = await evaluate(pageA, 'document.querySelector("[data-codex-tps]").getBoundingClientRect().x');
     await pageA.update(reading(A, 9));
-    assert.equal(await evaluate(pageA, 'document.querySelector("[data-codex-tps]").getBoundingClientRect().x'), before);
+    assert.ok(Math.abs(await evaluate(pageA, 'document.querySelector("[data-codex-tps]").getBoundingClientRect().x') - before) < 0.5,
+      'Changing the TPS digit count must not visibly shift the row (allow subpixel font rounding)');
     await pageA.update({ ...reading(A, 215), estimating: true, phase: 'generating' });
     assert.ok((await pageA.diagnostics()).text.startsWith('215tok/s'));
 
     // Native font/theme changes, narrower composers and multiline drafts preserve alignment.
     await evaluate(pageA, 'document.body.classList.add("dark");document.documentElement.style.setProperty("--font-ui-family","Arial");document.querySelector("main").style.width="360px";document.querySelector("[contenteditable]").innerText="one\\ntwo\\nthree";true');
     await until(async () => (await pageA.diagnostics())?.font.includes('Arial'), 'Font did not follow native CSS');
-    assert.ok(await evaluate(pageA, '(()=>{let a=document.querySelector("[data-codex-tps]").getBoundingClientRect(),b=document.querySelector("#model").getBoundingClientRect();return Math.abs(a.y+a.height/2-b.y-b.height/2)<1&&a.right<=b.left})()'));
+    const layout = await evaluate(pageA, '(()=>{let a=document.querySelector("[data-codex-tps]").getBoundingClientRect(),b=document.querySelector("#model").getBoundingClientRect();return {row:a.toJSON(),model:b.toJSON()}})()');
+    assert.ok(Math.abs(layout.row.y + layout.row.height / 2 - layout.model.y - layout.model.height / 2) < 1
+      && layout.row.right <= layout.model.left, JSON.stringify(layout));
     assert.equal(await evaluate(pageA, 'getComputedStyle(document.querySelector("[data-codex-tps]")).color'), 'rgb(170, 170, 170)');
     const dimensions = await pageA.cdp.call('Page.getLayoutMetrics');
     const image = await pageA.cdp.call('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: Math.min(dimensions.cssContentSize.width, 1000), height: 300, scale: 1 } });

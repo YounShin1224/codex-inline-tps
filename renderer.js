@@ -22,6 +22,7 @@
   let positionedHost = null;
   let originalPosition = '';
   let visualCenter = null;
+  let verticalOffset = 0;
 
   // Route parsing is per renderer/window. No globally most-recent chat is ever substituted.
   const threadFromLocation = () => {
@@ -177,6 +178,13 @@
     const clamped = Math.max(left + width / 2, Math.min(visualCenter, right - width / 2));
     const margin = `${(clamped - center) * 2}px`;
     if (row.style.marginLeft !== margin) row.style.marginLeft = margin;
+    // Native button metrics/margins differ on macOS. Align to the visible picker, not its grid cell.
+    const rowBounds = row.getBoundingClientRect();
+    const offset = Math.round((verticalOffset + centerY - rowBounds.y - rowBounds.height / 2) * 64) / 64;
+    if (offset !== verticalOffset) {
+      verticalOffset = offset;
+      row.style.transform = `translateY(${offset}px)`;
+    }
   }
 
   function paint() {
@@ -254,6 +262,7 @@
       digits = [];
       suffixes = [];
       row = makeRow();
+      verticalOffset = 0;
       anchor = composer.outer;
       mountPoint = composer.mount;
       lastStyle = '';

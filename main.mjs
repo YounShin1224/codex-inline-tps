@@ -1,25 +1,29 @@
 import net from 'node:net';
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile, appendFile, readdir, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, appendFile, readdir, stat, rm, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { RolloutReader } from './metrics.mjs';
 import { PageAttachment } from './cdp.mjs';
+import { acquireRuntimeLock, controlEndpoint, isAlive as alive, privateDirectory, resolveMacApp } from './platform.mjs';
 
 // All component-owned files live beside the delivered source. Codex's state is opened read-only.
 const root = path.dirname(fileURLToPath(import.meta.url));
 const runtime = path.join(root, '.runtime');
 const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
-const userKey = createHash('sha256').update(os.homedir()).digest('hex').slice(0, 16);
-const controlPath = process.platform === 'win32' ? `\\\\.\\pipe\\codex-inline-tps-${userKey}` : path.join(runtime, 'control.sock');
+const endpoint = controlEndpoint(root);
+const controlPath = endpoint.socket;
 const connectionPath = path.join(runtime, 'connection.json');
 const controlTokenPath = path.join(runtime, 'control-token');
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const args = process.argv.slice(2);
-const flag = (name) => args[args.indexOf(name) + 1];
+const flag = (name) => {
+  const index = args.indexOf(name);
+  if (index === -1 || !args[index + 1] || args[index + 1].startsWith('--')) throw new Error(`${name} requires a value`);
+  return args[index + 1];
+};
 
 async function log(message, details = {}) {
   await mkdir(runtime, { recursive: true });
@@ -101,16 +105,23 @@ async function jsonAt(port, endpoint) {
 }
 
 async function run() {
-  await mkdir(runtime, { recursive: true });
+  await privateDirectory(runtime);
   try { console.log(JSON.stringify(await control('status'))); return; } catch { /* Start one helper only. */ }
+  const release = await acquireRuntimeLock(runtime);
+  try { await runLocked(); } finally { await release(); }
+}
+
+async function runLocked() {
   const source = await readFile(path.join(root, 'renderer.js'), 'utf8');
-  const codexExecutable = args.includes('--codex') ? flag('--codex') : null;
+  const macApp = process.platform === 'darwin' ? await resolveMacApp({ app: args.includes('--codex') ? flag('--codex') : process.env.CODEX_TPS_APP }) : null;
+  const codexExecutable = macApp?.executable ?? (args.includes('--codex') ? flag('--codex') : null);
   if (!codexExecutable) throw new Error('Start with start.ps1 so the installed Codex executable is resolved correctly');
   const pages = new Map();
   const sessions = new Sessions();
   let stopping = false;
   let port = null;
-  let codexPid = Number(args.includes('--existing-pid') ? flag('--existing-pid') : 0);
+  let codexPid = macApp?.pid ?? Number(args.includes('--existing-pid') ? flag('--existing-pid') : 0);
+  if (!Number.isSafeInteger(codexPid) || codexPid < 0) throw new Error('Invalid existing Codex PID');
   let phase = 'starting';
   let discoverAt = 0;
   let lastError = null;
@@ -125,6 +136,7 @@ async function run() {
   const status = () => ({ phase, pid: process.pid, codexPid, port, error: lastError,
     windows: [...pages.values()].map((page) => ({ id: page.id, ...page.context, metrics: page.metrics ?? null })) });
   const server = net.createServer({ allowHalfOpen: true }, (socket) => {
+    socket.setTimeout(12000, () => socket.destroy());
     let input = '';
     socket.on('data', (chunk) => {
       input += chunk;
@@ -149,6 +161,13 @@ async function run() {
     });
     socket.on('error', () => {});
   });
+  if (endpoint.directory) {
+    await privateDirectory(endpoint.directory);
+    // Only the exclusive startup-lock owner may remove a socket left by a crash.
+    const oldSocket = await lstat(controlPath).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+    if (oldSocket && !oldSocket.isSocket()) throw new Error('Unsafe control socket path');
+    if (oldSocket) await rm(controlPath);
+  }
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(controlPath, resolve); });
   const stopSignal = () => { stopping = true; };
   process.on('SIGINT', stopSignal);
@@ -182,7 +201,7 @@ async function run() {
       const deadline = Date.now() + 60000;
       while (!stopping) {
         try { await jsonAt(port, '/json/version'); break; } catch { /* Electron may still be starting. */ }
-        if (!alive(codexPid) || Date.now() > deadline) throw new Error('Codex did not expose the local debugger; restart through the provided launcher');
+        if (!alive(codexPid) || Date.now() > deadline) throw new Error('Codex did not expose the local debugger; quit Codex normally and restart through the provided launcher');
         await pause(500);
       }
     }
@@ -236,7 +255,9 @@ async function run() {
   } finally {
     phase = 'stopping';
     await Promise.allSettled([...pages.values()].map((page) => page.detach()));
-    server.close();
+    await new Promise((resolve) => server.close(resolve));
+    process.off('SIGINT', stopSignal);
+    process.off('SIGTERM', stopSignal);
     await log('stopped');
   }
 }
@@ -253,7 +274,7 @@ try {
       if (['ENOENT', 'ECONNREFUSED'].includes(error.code)) console.log(JSON.stringify({ phase: 'not-running' }));
       else throw error;
     }
-  } else console.log('node main.mjs status | diagnostics | stop | inspect THREAD_ID');
+  } else console.log('node main.mjs start | status | diagnostics | stop | inspect THREAD_ID');
 } catch (error) {
   console.error(error.message);
   await log('error', { error: error.message }).catch(() => {});

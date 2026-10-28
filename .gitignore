@@ -10,6 +10,10 @@
 !/renderer.js
 !/cdp.mjs
 !/main.mjs
+!/platform.mjs
+!/launch.mjs
+!/启动 Codex TPS.command
+!/停止 Codex TPS.command
 !/start.ps1
 !/stop.ps1
 !/启动 Codex TPS.vbs
@@ -18,6 +22,8 @@
 /test/*
 !/test/metrics.test.mjs
 !/test/browser.test.mjs
+!/test/platform.test.mjs
+!/test/helper.test.mjs
 
 # Explicitly document sensitive local state even though the allowlist already excludes it.
 /.runtime/
