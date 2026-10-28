@@ -99,7 +99,7 @@ test('inline rendering: center, font, themes, model/chat isolation, reload and c
     assert.equal(a.fontSize, '13px');
     await pageA.update({ ...reading(A, 100), approximate: true });
     await ready(pageA);
-    assert.equal((await pageA.diagnostics()).text, '≈100tok/s·均值≈200·缓存90.50%');
+    assert.equal((await pageA.diagnostics()).text, '100tok/s·均值200·缓存90.50%');
     assert.ok(await evaluate(pageA, 'document.querySelector("[data-codex-tps]").title.includes("响应平均速度估算")'));
     await pageA.update(reading(A, 200));
     await ready(pageA);

@@ -269,12 +269,11 @@
       cacheValue = ordinary === '100.00' && !fullHit ? '<100.00' : ordinary;
     }
     const text = [
-      `${metrics?.approximate ? '≈' : ''}${tps(metrics?.current)}`,
-      `均值${metrics?.approximate ? '≈' : ''}${Number.isFinite(metrics?.mean) ? Math.round(metrics.mean) : '—'}`,
+      tps(metrics?.current),
+      `均值${Number.isFinite(metrics?.mean) ? Math.round(metrics.mean) : '—'}`,
       `缓存${Number.isFinite(metrics?.cache) ? cacheValue + '%' : '—'}`,
     ];
-    const numeric = [metrics?.current, metrics?.mean].map((value) => Number.isFinite(value)
-      ? `${metrics?.approximate ? '≈' : ''}${Math.round(value)}` : '—');
+    const numeric = [metrics?.current, metrics?.mean].map((value) => Number.isFinite(value) ? String(Math.round(value)) : '—');
     numeric.push(cacheValue);
     digits.forEach((element, index) => { if (element.textContent !== numeric[index]) element.textContent = numeric[index]; });
     suffixes[2].textContent = Number.isFinite(metrics?.cache) ? '%' : '';
@@ -287,7 +286,7 @@
       ? `本轮已完成 ${metrics.cacheRequests} 次模型请求，缓存输入合计 ${metrics.cacheHitTokens}，输入合计 ${metrics.cacheInputTokens}。`
       : '等待本轮完整的请求用量计数。';
     const formula = metrics?.approximate
-      ? '≈ 表示旧日志缺少生成起始时间：官方输出 token ÷ 请求开始（或上次工具返回）到输出完成/用量回报的响应时长，可能含排队、首 token 等待及用量回报延迟，属于响应平均速度估算，不是模型纯生成 TPS。只与同口径样本统计均值。'
+      ? '旧日志缺少生成起始时间：官方输出 token ÷ 请求开始（或上次工具返回）到输出完成/用量回报的响应时长，可能含排队、首 token 等待及用量回报延迟，属于响应平均速度估算，不是模型纯生成 TPS。只与同口径样本统计均值。'
       : 'TPS = 官方输出 token（含思考）÷ 本地模型输出区间的合并时长；排除工具执行区间。这是本地记录推算值，并非服务器精确瞬时速度。';
     const title = `${metrics?.model ?? '等待当前模型数据'}\n${phase}${measuredAt}\n${formula}\n均值只含本对话同模型、同口径的有效样本（${metrics?.samples ?? 0} 次），不足 1 秒的样本不参与。\n缓存 = 当前主会话这一轮所有已完成请求的缓存输入总和 ÷ 输入总和。${cacheDetails}`;
     if (row.title !== title) row.title = title;
