@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, appendFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { SessionMetrics, RolloutReader, unionDuration } from '../metrics.mjs';
+import { zstdCompressSync, gzipSync } from 'node:zlib';
 
 // Fixtures carry explicit times and exact token totals, so every expected rate can be hand-checked.
 const thread = '11111111-1111-4111-8111-111111111111';
@@ -173,6 +174,71 @@ test('missing first sample does not invent a live TPS', () => {
   [context('a', modelA, 0), event('a', 'task_started', 0)].forEach((entry) => engine.ingest(entry));
   assert.equal(engine.snapshot().current, null);
   assert.equal(engine.snapshot().mean, null);
+});
+
+test('older completion-only logs use explicitly approximate response windows, excluding prior tool waits', () => {
+  const engine = new SessionMetrics(thread);
+  [event('a', 'task_started', 0), context('a', modelA, 0),
+    event('a', 'item_completed', 4000, { item: { id: 'old-1', type: 'AgentMessage' }, completed_at_ms: 4000 }),
+    at(4050, 'response_item', { type: 'custom_tool_call', call_id: 'wait' }), usage('a', 'r1', 4100, 400),
+    at(60000, 'response_item', { type: 'custom_tool_call_output', call_id: 'wait' }),
+    event('a', 'item_completed', 64000, { item: { id: 'old-2', type: 'AgentMessage' }, completed_at_ms: 64000 }),
+    usage('a', 'r2', 64100, 400), event('a', 'task_complete', 64200)]
+    .forEach((entry) => engine.ingest(entry));
+  const result = engine.snapshot();
+  assert.equal(result.approximate, true);
+  assert.equal(result.timing, 'response-window');
+  assert.equal(result.current, 100);
+  assert.equal(result.mean, 100);
+  assert.equal(result.measuredSamples, 0);
+  assert.equal(result.approximateSamples, 2);
+});
+
+test('CLI logs without item timing can use official response accounting; measured samples remain separate', () => {
+  const engine = new SessionMetrics(thread);
+  [event('a', 'task_started', 0), context('a', modelA, 0), usage('a', 'old', 4000, 400), event('a', 'task_complete', 4100)]
+    .forEach((entry) => engine.ingest(entry));
+  assert.equal(engine.snapshot().current, 100);
+  assert.equal(engine.snapshot().approximate, true);
+  completed(engine, 'measured', modelA, 10000, 2000, 400);
+  const result = engine.snapshot();
+  assert.equal(result.current, 200);
+  assert.equal(result.mean, 200);
+  assert.equal(result.approximate, false);
+  assert.equal(result.samples, 1);
+  assert.equal(result.approximateSamples, 1);
+});
+
+test('missing official counts or conflicting legacy usage never produce an approximate rate', () => {
+  const engine = new SessionMetrics(thread);
+  [event('a', 'task_started', 0), context('a', modelA, 0),
+    event('a', 'item_completed', 4000, { item: { id: 'old', type: 'AgentMessage' }, completed_at_ms: 4000 })]
+    .forEach((entry) => engine.ingest(entry));
+  assert.equal(engine.snapshot().current, null);
+  engine.ingest(usage('a', 'conflict', 4100, 400));
+  engine.ingest(usage('a', 'conflict', 4200, 800));
+  assert.equal(engine.snapshot().current, null);
+});
+
+test('compressed Zstandard and gzip logs are read without extraction and unchanged files reuse parsed metadata', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'codex-tps-compressed-'));
+  try {
+    const rows = [context('a', modelA, 0), item('a', 'm', 1000, 3000), usage('a', 'r', 4000)];
+    const text = rows.map((entry) => JSON.stringify(entry) + '\n').join('');
+    for (const [suffix, compress] of [['zst', zstdCompressSync], ['gz', gzipSync]]) {
+      const file = path.join(directory, 'rollout.jsonl.' + suffix);
+      await writeFile(file, compress(Buffer.from(text)));
+      const reader = new RolloutReader(file, thread);
+      const first = await reader.poll();
+      assert.equal(first.snapshot().current, 200);
+      assert.equal(await reader.poll(), first);
+      await writeFile(file, compress(Buffer.from(text + JSON.stringify(context('b', modelB, 5000)) + '\n')));
+      const replacement = await reader.poll();
+      assert.notEqual(replacement, first);
+      assert.equal(replacement.snapshot('GPT-6.1 Sol').current, 200);
+      assert.deepEqual(replacement.snapshot().warnings, []);
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test('two responses with tool execution between their model windows retain separate numerators', () => {

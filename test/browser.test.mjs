@@ -27,6 +27,9 @@ body.dark { background:#202020; color:#eee; --color-text-secondary:#aaa; } body.
 
 async function findBrowser() {
   const candidates = [process.env.CODEX_TPS_TEST_BROWSER,
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome',
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'];
   for (const candidate of candidates.filter(Boolean)) { try { await access(candidate); return candidate; } catch {} }
@@ -78,11 +81,15 @@ test('inline rendering: center, font, themes, model/chat isolation, reload and c
     }
     const pageA = await attach(A);
     const pageB = await attach(B);
+    assert.equal((await pageA.diagnostics()).visible, false, 'No placeholder row while initial metrics are loading');
+    const ready = (page) => until(async () => (await page.diagnostics())?.visible, 'Complete data and stable layout did not reveal the row');
     const evaluate = async (page, expression) => (await page.cdp.call('Runtime.evaluate', { expression, returnByValue: true })).result?.value;
     const reading = (threadId, current, modelLabel = 'GPT-6.1 Sol') => ({ threadId, model: 'gpt-6.1-sol', modelLabel,
       current, mean: 200, cache: 90.5, samples: 4, estimating: false, phase: 'idle' });
     await pageA.update(reading(A, 200));
     await pageB.update(reading(B, 75));
+    await ready(pageA);
+    await ready(pageB);
     let a = await pageA.diagnostics();
     let b = await pageB.diagnostics();
     assert.equal(a.text, '200tok/s·均值200·缓存90.50%');
@@ -90,16 +97,52 @@ test('inline rendering: center, font, themes, model/chat isolation, reload and c
     assert.ok(a.visualCenterError < 0.5);
     assert.match(a.font, /Segoe UI/);
     assert.equal(a.fontSize, '13px');
+    await pageA.update({ ...reading(A, 100), approximate: true });
+    await ready(pageA);
+    assert.equal((await pageA.diagnostics()).text, '100tok/s·均值200·缓存90.50%');
+    assert.ok(await evaluate(pageA, 'document.querySelector("[data-codex-tps]").title.includes("响应平均速度估算")'));
+    await pageA.update(reading(A, 200));
+    await ready(pageA);
+    // Ordinary editor/caret mutations and task-hover decorations are not loading signals.
+    const steady = await pageA.cdp.call('Runtime.evaluate', { awaitPromise: true, returnByValue: true, expression: `(async()=>{
+      const row=document.querySelector('[data-codex-tps]'), editor=document.querySelector('[contenteditable]');
+      const hidden=[];const observer=new MutationObserver(()=>{if(getComputedStyle(row).visibility!=='visible')hidden.push(true)});
+      observer.observe(row,{attributes:true,attributeFilter:['style','aria-hidden']});
+      for(let i=0;i<4;i++){
+        editor.textContent+='a';editor.dataset.caret=String(i);document.body.dataset.hoverTask=String(i);
+        await new Promise(resolve=>setTimeout(resolve,80));
+      }
+      document.querySelector('main').style.width='600px';
+      await new Promise(resolve=>setTimeout(resolve,300));observer.disconnect();
+      return {hidden:hidden.length,visible:getComputedStyle(row).visibility==='visible'};
+    })()` });
+    assert.deepEqual(steady.result.value, { hidden: 0, visible: true }, 'Typing, task hover and valid resizing must not blink the row');
+    await pageA.update({ ...reading(A, 200), cache: null });
+    assert.equal((await pageA.diagnostics()).visible, false, 'Incomplete cache data must hide the whole row');
+    await pageA.update({ ...reading(A, 200), current: null });
+    assert.equal((await pageA.diagnostics()).visible, false, 'Missing TPS must not show a dash placeholder');
+    await pageA.update(reading(A, 200));
+    await ready(pageA);
+    await evaluate(pageA, 'document.querySelector("footer").style.gridRow="auto";true');
+    await until(async () => !(await pageA.diagnostics()).visible, 'Loading grid layout should hide the row');
+    assert.equal((await pageA.diagnostics()).readiness, 'waiting-for-layout');
+    await evaluate(pageA, 'document.querySelector("footer").style.gridRow="2";true');
+    await ready(pageA);
     const before = await evaluate(pageA, 'document.querySelector("[data-codex-tps]").getBoundingClientRect().x');
     await pageA.update(reading(A, 9));
-    assert.equal(await evaluate(pageA, 'document.querySelector("[data-codex-tps]").getBoundingClientRect().x'), before);
+    assert.ok(Math.abs(await evaluate(pageA, 'document.querySelector("[data-codex-tps]").getBoundingClientRect().x') - before) < 0.5,
+      'Changing the TPS digit count must not visibly shift the row (allow subpixel font rounding)');
     await pageA.update({ ...reading(A, 215), estimating: true, phase: 'generating' });
+    await ready(pageA);
     assert.ok((await pageA.diagnostics()).text.startsWith('215tok/s'));
 
     // Native font/theme changes, narrower composers and multiline drafts preserve alignment.
     await evaluate(pageA, 'document.body.classList.add("dark");document.documentElement.style.setProperty("--font-ui-family","Arial");document.querySelector("main").style.width="360px";document.querySelector("[contenteditable]").innerText="one\\ntwo\\nthree";true');
     await until(async () => (await pageA.diagnostics())?.font.includes('Arial'), 'Font did not follow native CSS');
-    assert.ok(await evaluate(pageA, '(()=>{let a=document.querySelector("[data-codex-tps]").getBoundingClientRect(),b=document.querySelector("#model").getBoundingClientRect();return Math.abs(a.y+a.height/2-b.y-b.height/2)<1&&a.right<=b.left})()'));
+    await ready(pageA);
+    const layout = await evaluate(pageA, '(()=>{let a=document.querySelector("[data-codex-tps]").getBoundingClientRect(),b=document.querySelector("#model").getBoundingClientRect();return {row:a.toJSON(),model:b.toJSON()}})()');
+    assert.ok(Math.abs(layout.row.y + layout.row.height / 2 - layout.model.y - layout.model.height / 2) < 1
+      && layout.row.right <= layout.model.left, JSON.stringify(layout));
     assert.equal(await evaluate(pageA, 'getComputedStyle(document.querySelector("[data-codex-tps]")).color'), 'rgb(170, 170, 170)');
     const dimensions = await pageA.cdp.call('Page.getLayoutMetrics');
     const image = await pageA.cdp.call('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: Math.min(dimensions.cssContentSize.width, 1000), height: 300, scale: 1 } });
@@ -121,14 +164,15 @@ test('inline rendering: center, font, themes, model/chat isolation, reload and c
     // A chat or picker switch clears the old numbers before new data can be delivered.
     await evaluate(pageA, `history.pushState({},'', '/local/${B}');dispatchEvent(new PopStateEvent('popstate'));true`);
     await until(() => pageA.context?.threadId === B, 'Thread context did not switch');
-    assert.ok((await pageA.diagnostics()).text.startsWith('—tok/s'));
+    assert.equal((await pageA.diagnostics()).visible, false);
     await pageA.update(reading(A, 999));
-    assert.ok((await pageA.diagnostics()).text.startsWith('—tok/s'));
+    assert.equal((await pageA.diagnostics()).visible, false);
     await pageA.update(reading(B, 75));
+    await ready(pageA);
     assert.ok((await pageA.diagnostics()).text.startsWith('75tok/s'));
     await evaluate(pageA, 'document.querySelector("#model").textContent="GPT-6.1 Terra";true');
     await until(() => pageA.context?.modelLabel === 'GPT-6.1 Terra', 'Model context did not switch');
-    assert.ok((await pageA.diagnostics()).text.startsWith('—tok/s'));
+    assert.equal((await pageA.diagnostics()).visible, false);
 
     // A native subtree replacement and full page reload each recreate exactly one row.
     await evaluate(pageB, 'document.querySelector("#outer").outerHTML=document.querySelector("#outer").outerHTML;true');
@@ -136,6 +180,9 @@ test('inline rendering: center, font, themes, model/chat isolation, reload and c
     await until(async () => await evaluate(pageB, 'document.querySelectorAll("[data-codex-tps]").length') === 1, 'Remount created missing/duplicate rows');
     await pageB.cdp.call('Page.reload');
     await until(async () => pageB.world && pageB.context?.mounted && Boolean(await pageB.diagnostics()), 'Reload did not restore the row');
+    assert.equal((await pageB.diagnostics()).visible, false, 'Reload must wait for fresh metrics');
+    await pageB.update(reading(B, 75));
+    await ready(pageB);
     assert.equal(await evaluate(pageB, 'document.querySelectorAll("[data-codex-tps]").length'), 1);
     await pageA.detach();
     assert.equal(await evaluate(pageA, 'document.querySelectorAll("[data-codex-tps]").length').catch(() => 0), 0);
