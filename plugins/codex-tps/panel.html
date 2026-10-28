@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Codex TPS</title>
+<style>
+*{box-sizing:border-box} :root{color-scheme:light dark;font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);color:var(--color-text-primary,#252525);background:var(--color-background-primary,#fff);--muted:var(--color-text-secondary,#737373);--line:var(--color-border-secondary,#e5e5e5);--card:var(--color-background-secondary,#f6f6f6);--accent:#16886d}
+:root[data-theme=dark]{--color-text-primary:#ececec;--color-text-secondary:#a0a0a0;--color-border-secondary:#363636;--color-background-primary:#212121;--color-background-secondary:#2b2b2b;--accent:#65c8aa}
+body{margin:0;padding:24px;min-width:240px;font-size:13px;line-height:1.5} h1,h2,p{margin:0} h1{font-size:17px;font-weight:600;letter-spacing:-.3px} h2{font-size:12px;color:var(--muted);font-weight:400} button,input,select{font:inherit;color:inherit} button{border:1px solid var(--line);background:transparent;border-radius:7px;padding:5px 10px;cursor:pointer} button:disabled{opacity:.45;cursor:default} button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px} input,select{background:var(--card);border:1px solid var(--line);border-radius:7px;padding:8px;min-width:0;max-width:100%} input{width:100%}
+header,.status-line,.bind-row{display:flex;align-items:center;justify-content:space-between;gap:8px} header{margin-bottom:24px} .subtle{color:var(--muted);font-size:12px} .status{font-size:11px;padding:2px 7px;border-radius:12px;background:var(--card);color:var(--muted)} .status[data-active=true]{color:var(--accent)} .hero{margin:24px 0 20px} .reading{font-size:64px;line-height:1.1;font-weight:550;letter-spacing:-3px;font-variant-numeric:tabular-nums} .unit{color:var(--muted);font-size:14px;margin-left:8px;letter-spacing:0;font-weight:400} .kind{font-size:11px;color:var(--accent);margin-top:7px;min-height:17px} .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px} .card{padding:14px;border:1px solid var(--line);border-radius:10px} .value{font-size:23px;font-weight:500;line-height:1.5;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+.spark{margin:22px 0 10px;height:54px;width:100%;display:block} .chart-label{display:flex;justify-content:space-between;color:var(--muted);font-size:11px} .model{width:100%;margin:18px 0 8px} .thread{font-family:ui-monospace,SFMono-Regular,monospace;overflow-wrap:anywhere;font-size:11px;color:var(--muted);margin:8px 0} .hint{margin-top:18px;color:var(--muted);font-size:12px} .empty{padding:28px 0} .empty p{margin:8px 0 20px;color:var(--muted)} details{border-top:1px solid var(--line);margin-top:22px;padding-top:14px} summary{cursor:pointer;color:var(--muted);font-size:12px} details p{margin-top:10px;color:var(--muted);font-size:12px}.bind-row{margin:10px 0}.bind-row input{flex:1} #sessions{width:100%} #error{color:#c35446;white-space:pre-wrap;margin-top:12px;font-size:12px} [hidden]{display:none!important} #updated{min-height:18px}
+@media(max-width:330px){body{padding:16px}.reading{font-size:52px}.grid{gap:8px}.card{padding:10px}.value{font-size:20px}}
+</style></head><body>
+<header><h1>Codex TPS</h1><button id="pause" disabled>暂停</button></header>
+<div class="status-line"><span class="subtle">输出速度</span><span id="status" class="status">连接中</span></div>
+<section id="empty" class="empty"><h1>选择要观察的会话</h1><p>每个面板独立绑定一个本地会话。也可以让 Codex 打开本对话的 TPS 面板。</p></section>
+<section id="metrics" hidden>
+  <div class="hero"><span id="current" class="reading">—</span><span class="unit">tok/s</span><div id="kind" class="kind"></div></div>
+  <div class="grid"><div class="card"><h2>会话均值 · tok/s</h2><div id="mean" class="value">—</div></div><div class="card"><h2>本轮缓存命中率</h2><div id="cache" class="value">—</div></div></div>
+  <svg id="spark" class="spark" viewBox="0 0 300 54" role="img" aria-label="面板打开后收到的有效测速样本"><path id="spark-path" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg>
+  <div class="chart-label"><span>打开面板后的实测样本</span><span id="samples">0 次有效测量</span></div>
+  <label class="subtle" for="model">观察模型</label><select id="model" class="model"><option value="">跟随最新请求</option></select>
+  <div id="thread" class="thread"></div><div id="updated" class="subtle" aria-live="off"></div>
+  <p id="hint" class="hint"></p>
+</section>
+<details id="binding" open><summary>绑定会话</summary>
+  <div class="bind-row"><select id="sessions" aria-label="最近更新的本地会话"><option value="">加载最近会话…</option></select><button id="reload" title="重新加载会话列表">刷新</button></div>
+  <div class="bind-row"><input id="thread-input" placeholder="粘贴完整会话 ID" aria-label="本地会话 ID" spellcheck="false" autocomplete="off"><button id="bind">绑定</button></div>
+</details>
+<p id="error" role="alert"></p>
+<details><summary>读数口径</summary><p>TPS 为日志记录的官方输出 token（含隐藏思考）除以模型输出区间的合并时长，排除工具执行耗时。生成中显示同会话、同模型最近五次有效响应的加权估算。</p><p>均值只统计当前会话、所选模型的有效实测响应。缓存率按本轮所有主会话请求的输入 token 加权计算。缺少可靠计时或用量时显示 —。</p><p>面板读取本机日志；自动刷新不需要模型参与。历史曲线只记录本次打开面板后收到的实测样本。</p></details>
+<script>/* __PANEL_SCRIPT__ */</script></body></html>

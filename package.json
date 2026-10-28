@@ -4,5 +4,18 @@
   "private": true,
   "type": "module",
   "engines": { "node": ">=24" },
-  "scripts": { "test": "node --test test/*.test.mjs", "status": "node main.mjs status", "stop": "node main.mjs stop" }
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "build:plugin": "node scripts/build-plugin.mjs",
+    "package:plugin": "node scripts/package-plugin.mjs",
+    "test:plugin": "node --test test/plugin*.test.mjs",
+    "status": "node main.mjs status",
+    "stop": "node main.mjs stop"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@modelcontextprotocol/ext-apps": "1.7.5",
+    "esbuild": "0.28.1",
+    "zod": "4.4.3"
+  }
 }
