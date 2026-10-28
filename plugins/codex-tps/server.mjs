@@ -38,4 +38,3 @@ export function createTpsServer({ store = new SessionStore(), html } = {}) {
   }, async () => ({ content: [], structuredContent: { sessions: await store.list() } }));
   return server;
 }
-
