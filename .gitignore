@@ -6,6 +6,28 @@
 !/SECURITY.md
 !/LICENSE
 !/package.json
+!/package-lock.json
+!/plugins/
+/plugins/*
+!/plugins/codex-tps/
+/plugins/codex-tps/*
+!/plugins/codex-tps/plugin.json
+!/plugins/codex-tps/README.md
+!/plugins/codex-tps/mcp.json
+!/plugins/codex-tps/server.mjs
+!/plugins/codex-tps/session-store.mjs
+!/plugins/codex-tps/entry.mjs
+!/plugins/codex-tps/panel.mjs
+!/plugins/codex-tps/panel.html
+!/.agents/
+/.agents/*
+!/.agents/plugins/
+/.agents/plugins/*
+!/.agents/plugins/marketplace.json
+!/scripts/
+/scripts/*
+!/scripts/build-plugin.mjs
+!/scripts/package-plugin.mjs
 !/metrics.mjs
 !/renderer.js
 !/cdp.mjs
@@ -18,6 +40,8 @@
 /test/*
 !/test/metrics.test.mjs
 !/test/browser.test.mjs
+!/test/plugin.test.mjs
+!/test/plugin.browser.test.mjs
 
 # Explicitly document sensitive local state even though the allowlist already excludes it.
 /.runtime/

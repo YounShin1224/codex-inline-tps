@@ -1,5 +1,15 @@
 # Codex 输入框 TPS
 
+## 原生侧栏插件版（本分支）
+
+本分支另外提供原生 **Codex TPS** 插件，通过官方 MCP Apps `thread` 入口在聊天右侧显示速度、均值、缓存率和实测趋势。由 Codex 加载本地服务，无需调试端口、页面注入或独立启动助手。它与下面的输入框版本是两个独立入口。
+
+在仓库根目录先运行 `npm ci`、`npm run build:plugin`，再执行 `codex plugin marketplace add .` 和 `codex plugin add codex-tps@codex-tps-local`。重启后从聊天右侧的内容面板入口打开 **Codex TPS**，选择要观察的会话；也可以让 Codex 调用 `open_codex_tps` 并传入准确的本对话 ID。静态入口不会自动猜测当前会话。
+
+完整安装、打包、读数口径与宿主兼容说明见 [原生插件 README](plugins/codex-tps/README.md)。`npm run test:plugin` 验证协议、分发包和浏览器内的宿主桥接。原生插件的 UI 依赖宿主支持官方会话入口；MCP 工具可用不等于所有客户端都能显示右侧面板。
+
+## 输入框版本
+
 在输入框底部左侧权限按钮与右侧模型控件之间的空白区域居中、紧凑显示，与模型选择器位于同一水平线；位置随两侧按钮的实际宽度自动调整：
 
 ```text

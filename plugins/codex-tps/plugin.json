@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "codex-tps",
+  "version": "0.1.0",
+  "description": "在聊天右侧查看本地 Codex 会话的输出速度、均值和缓存命中率。",
+  "author": { "name": "YounShin1224" },
+  "repository": "https://github.com/YounShin1224/codex-inline-tps",
+  "license": "MIT",
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true,
+      "interface": {
+        "displayName": "Codex TPS",
+        "shortDescription": "聊天右侧的本地 TPS 面板",
+        "developerName": "YounShin1224",
+        "category": "Developer Tools",
+        "capabilities": ["Read"],
+        "defaultPrompt": ["在右侧打开本对话的 TPS 面板"]
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "codex-tps-local",
+  "interface": { "displayName": "Codex TPS 本地插件" },
+  "plugins": [{
+    "name": "codex-tps",
+    "source": { "source": "local", "path": "./plugins/codex-tps" },
+    "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+    "category": "Developer Tools"
+  }]
+}

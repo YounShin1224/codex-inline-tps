@@ -1,5 +1,15 @@
 # Privacy and security
 
+## Native sidebar plugin
+
+The separate `plugins/codex-tps` implementation uses a local stdio MCP server and an MCP Apps thread entrypoint. It does not connect to Electron's debugger, inject DOM into Codex, open an HTTP listener, change model/proxy configuration, or make external API requests. The UI and dependencies are bundled; its CSP declares no external connection or resource domains.
+
+Only UUIDs and an optional model ID are accepted for metrics reads, never paths. Session discovery stays under `CODEX_HOME` (or `~/.codex`) sessions and archived_sessions, does not follow directory/file symlinks, and returns only IDs and modification timestamps. The parser transiently reads local JSONL but retains only numeric metadata and identifiers; conversation bodies, titles, credentials and tool arguments are not sent to the panel. The native entrypoint never substitutes the latest active chat for an unbound panel. Selection stays in each panel instance, and stale in-flight replies are ignored after a selection changes.
+
+Automatic refresh uses app-only read tools, not model sampling or model-context updates. Closing or pausing the panel stops polling. Treat this as a local desktop plugin: do not expose its server through a remote bridge or publish user session files. The source package requires a build; the prepared distribution contains runtime dependencies and their notices.
+
+The following debugger and control-endpoint notes apply to the independent input-box implementation.
+
 ## Data access
 
 The helper reads the selected local chat's uncompressed Codex JSONL session file. The parser receives each JSON record in memory, but retains only thread/model identifiers, token counts, timing intervals and tool-call IDs. It does not save conversation text, drafts, tool arguments or authentication files.
